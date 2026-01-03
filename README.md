@@ -867,27 +867,71 @@ All configuration is via environment variables:
 
 ## Available Tools
 
-### Free Tier
+The MCP server provides 17 specialized tools organized by subscription tier. Each tool has a specific purpose and returns structured data.
 
-- `fetch_analytics` - Fetch channel analytics data
-- `summarize_data` - Create data summaries
-- `recall_context` - Recall conversation context
-- `search_data` - Search across data sources
+### Free Tier (6 tools)
 
-### Pro Tier
+| Tool                   | Category  | Description                                                                                                                                                       |
+| ---------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fetch_analytics`      | Analytics | Fetch analytics data for a channel or time period. Returns views, subscribers, engagement metrics, and watch time statistics.                                     |
+| `summarize_data`       | Report    | Create a concise summary of data with key highlights. Useful for quick overviews and executive summaries.                                                         |
+| `recall_context`       | Memory    | Recall relevant context from conversation history. Retrieves previous discussions and maintains conversation continuity.                                          |
+| `search_data`          | Search    | Search across all available data sources including analytics, history, and insights. Returns matched results with source attribution.                             |
+| `get_channel_snapshot` | Analytics | Get a summarized snapshot of YouTube channel performance for a given period (7/30/90 days). Returns subscribers, views, video count, CTR, and average watch time. |
+| `get_top_videos`       | Analytics | Return top-performing videos for a YouTube channel sorted by views, engagement, or CTR. Enables cross-video performance comparison.                               |
 
-- `compute_metrics` - Compute derived metrics
-- `generate_chart` - Generate visualization data
-- `analyze_data` - Deep data analysis
-- `generate_insight` - Generate actionable insights
-- `generate_report` - Create comprehensive reports
-- `search_history` - Search historical data
+### Pro Tier (8 tools)
 
-### Agency Tier
+| Tool                   | Category  | Description                                                                                                                                                             |
+| ---------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `compute_metrics`      | Analytics | Compute derived metrics from raw analytics data including growth rate, engagement rate, and trend analysis.                                                             |
+| `generate_chart`       | Analytics | Generate chart data for visualization (line, bar, pie charts). Returns labels and datasets ready for frontend rendering.                                                |
+| `analyze_data`         | Insight   | Perform deep analysis on channel data with focus areas. Returns analysis summary, key findings, and confidence scores.                                                  |
+| `generate_insight`     | Insight   | Generate actionable insights from analyzed data. Returns prioritized insights with specific action items.                                                               |
+| `generate_report`      | Report    | Generate comprehensive reports with multiple sections. Includes title, summary, detailed sections, and timestamp.                                                       |
+| `search_history`       | Memory    | Search through historical data and conversations. Returns results with relevance scores for better context matching.                                                    |
+| `video_post_mortem`    | Insight   | Analyze why a video underperformed or overperformed compared to channel average or last 5 videos. Returns verdict, data-driven reasons, and actionable recommendations. |
+| `weekly_growth_report` | Report    | Generate weekly growth analysis with week-over-week comparisons. Returns summary, concrete wins/losses with metrics, and strategic next actions.                        |
 
-- `get_recommendations` - Personalized recommendations
-- `execute_action` - Execute actions
-- `schedule_task` - Schedule future tasks
+### Agency Tier (3 tools)
+
+| Tool                  | Category | Description                                                                                                                               |
+| --------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_recommendations` | Insight  | Get personalized recommendations based on channel data and goals. Returns prioritized recommendations with rationale and expected impact. |
+| `execute_action`      | Action   | Execute a specific action on behalf of the user (with confirmation). Supports various action types with custom parameters.                |
+| `schedule_task`       | Action   | Schedule a task for future execution. Returns task ID and next run time for tracking and management.                                      |
+
+### Tool Categories
+
+| Category      | Purpose                              | Example Use Cases                       |
+| ------------- | ------------------------------------ | --------------------------------------- |
+| **Analytics** | Data fetching and metric computation | Views, subscribers, CTR, watch time     |
+| **Insight**   | Data analysis and recommendations    | Growth patterns, performance reasons    |
+| **Report**    | Report and summary generation        | Weekly reports, monthly summaries       |
+| **Memory**    | Context recall and history search    | Previous conversations, historical data |
+| **Action**    | Task execution and scheduling        | Automated actions, scheduled tasks      |
+| **Search**    | Data search across sources           | Finding specific information            |
+
+### Tool Access by Plan
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      AGENCY (17 tools)                      │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │                   PRO (14 tools)                     │   │
+│  │  ┌─────────────────────────────────────────────┐    │   │
+│  │  │              FREE (6 tools)                  │    │   │
+│  │  │  fetch_analytics, summarize_data,           │    │   │
+│  │  │  recall_context, search_data,               │    │   │
+│  │  │  get_channel_snapshot, get_top_videos       │    │   │
+│  │  └─────────────────────────────────────────────┘    │   │
+│  │  + compute_metrics, generate_chart, analyze_data,   │   │
+│  │    generate_insight, generate_report, search_history│   │
+│  │    video_post_mortem, weekly_growth_report          │   │
+│  └─────────────────────────────────────────────────────┘   │
+│  + get_recommendations, execute_action, schedule_task      │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ## Development
 
@@ -899,18 +943,60 @@ All configuration is via environment variables:
 
 ### Extending Tools
 
-Add new tools in `registry/tools.py`:
+Tools are organized in a modular structure under `registry/`:
+
+```
+registry/
+├── base.py           # Core classes (ToolResult, ToolDefinition)
+├── tools.py          # Tool registry with definitions
+├── handlers/         # Handler implementations by category
+│   ├── analytics.py  # fetch_analytics, compute_metrics, generate_chart
+│   ├── insight.py    # analyze_data, generate_insight, get_recommendations
+│   ├── report.py     # generate_report, summarize_data
+│   ├── memory.py     # recall_context, search_history
+│   ├── action.py     # execute_action, schedule_task
+│   ├── search.py     # search_data
+│   └── youtube.py    # get_channel_snapshot, get_top_videos,
+│                     # video_post_mortem, weekly_growth_report
+├── schemas.py        # Pydantic request/response models
+└── policies.py       # Plan-based access control
+```
+
+**Step 1:** Add handler in the appropriate `handlers/*.py` file:
 
 ```python
+# registry/handlers/analytics.py
+class AnalyticsHandlers:
+    @staticmethod
+    async def my_new_handler(input_data: dict[str, Any]) -> dict[str, Any]:
+        """Handler implementation."""
+        return {"result": "data"}
+```
+
+**Step 2:** Register the tool in `registry/tools.py`:
+
+```python
+from .handlers import AnalyticsHandlers
+
+# In the appropriate _register_*_tools() method:
 self._register_tool(ToolDefinition(
     name="my_new_tool",
     description="Description of what it does",
     input_schema={...},
     output_schema={...},
-    handler=self._my_handler,
-    category="custom",
+    handler=AnalyticsHandlers.my_new_handler,
+    category="analytics",
     requires_plan="pro"
 ))
+```
+
+**Step 3:** Update `registry/policies.py` with the new tool:
+
+```python
+TOOL_REQUIREMENTS: dict[str, str] = {
+    # ...existing tools...
+    "my_new_tool": "pro",  # Add minimum required plan
+}
 ```
 
 ### Adding LLM Providers

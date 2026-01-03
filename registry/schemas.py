@@ -343,3 +343,485 @@ class ActionOutput(BaseModel):
         ...,
         description="Human-readable result message"
     )
+
+
+# =============================================================================
+# Channel Snapshot Schemas
+# =============================================================================
+
+from enum import Enum
+
+
+class SnapshotPeriod(str, Enum):
+    """Valid time periods for channel snapshots."""
+    LAST_7_DAYS = "last_7_days"
+    LAST_30_DAYS = "last_30_days"
+    LAST_90_DAYS = "last_90_days"
+
+
+class ChannelSnapshotInput(BaseModel):
+    """
+    Input schema for get_channel_snapshot tool.
+    
+    Provides a summarized snapshot of a YouTube channel's performance
+    for a given time period.
+    """
+
+    channel_id: str = Field(
+        ...,
+        description="The YouTube channel ID to get snapshot for",
+        min_length=1,
+        max_length=128,
+        examples=["UC_x5XG1OV2P6uZZ5FSM9Ttw"]
+    )
+
+    period: SnapshotPeriod = Field(
+        ...,
+        description="Time period for the snapshot",
+        examples=["last_7_days", "last_30_days", "last_90_days"]
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "channel_id": "UC_x5XG1OV2P6uZZ5FSM9Ttw",
+                "period": "last_30_days"
+            }
+        }
+
+
+class ChannelSnapshotOutput(BaseModel):
+    """
+    Output schema for get_channel_snapshot tool.
+    
+    Contains key performance metrics for a YouTube channel
+    over the specified time period.
+    """
+
+    subscribers: int = Field(
+        ...,
+        description="Total subscriber count",
+        ge=0,
+        examples=[12500]
+    )
+
+    views: int = Field(
+        ...,
+        description="Total views in the period",
+        ge=0,
+        examples=[85420]
+    )
+
+    videos: int = Field(
+        ...,
+        description="Number of videos published in the period",
+        ge=0,
+        examples=[8]
+    )
+
+    avg_ctr: float = Field(
+        ...,
+        description="Average click-through rate (percentage)",
+        ge=0.0,
+        le=100.0,
+        examples=[5.75]
+    )
+
+    avg_watch_time_minutes: float = Field(
+        ...,
+        description="Average watch time in minutes",
+        ge=0.0,
+        examples=[7.25]
+    )
+
+    period: str = Field(
+        ...,
+        description="The time period for this snapshot",
+        examples=["last_30_days"]
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "subscribers": 12500,
+                "views": 85420,
+                "videos": 8,
+                "avg_ctr": 5.75,
+                "avg_watch_time_minutes": 7.25,
+                "period": "last_30_days"
+            }
+        }
+
+
+# =============================================================================
+# Top Videos Schemas
+# =============================================================================
+
+class TopVideosPeriod(str, Enum):
+    """Valid time periods for top videos analysis."""
+    LAST_7_DAYS = "last_7_days"
+    LAST_30_DAYS = "last_30_days"
+
+
+class TopVideosSortBy(str, Enum):
+    """Valid sort criteria for top videos."""
+    VIEWS = "views"
+    ENGAGEMENT = "engagement"
+    CTR = "ctr"
+
+
+class TopVideosInput(BaseModel):
+    """
+    Input schema for get_top_videos tool.
+    
+    Returns top-performing videos for a channel over a time period
+    to enable cross-video reasoning.
+    """
+
+    channel_id: str = Field(
+        ...,
+        description="The YouTube channel ID to get top videos for",
+        min_length=1,
+        max_length=128,
+        examples=["UC_x5XG1OV2P6uZZ5FSM9Ttw"]
+    )
+
+    period: TopVideosPeriod = Field(
+        ...,
+        description="Time period for video performance analysis",
+        examples=["last_7_days", "last_30_days"]
+    )
+
+    sort_by: TopVideosSortBy = Field(
+        ...,
+        description="Metric to sort videos by",
+        examples=["views", "engagement", "ctr"]
+    )
+
+    limit: int = Field(
+        default=10,
+        description="Maximum number of videos to return",
+        ge=1,
+        le=50,
+        examples=[10]
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "channel_id": "UC_x5XG1OV2P6uZZ5FSM9Ttw",
+                "period": "last_30_days",
+                "sort_by": "views",
+                "limit": 10
+            }
+        }
+
+
+class VideoPerformance(BaseModel):
+    """Schema for individual video performance data."""
+
+    video_id: str = Field(
+        ...,
+        description="YouTube video ID",
+        examples=["dQw4w9WgXcQ"]
+    )
+
+    title: str = Field(
+        ...,
+        description="Video title",
+        examples=["How to Grow Your YouTube Channel in 2026"]
+    )
+
+    views: int = Field(
+        ...,
+        description="Total view count",
+        ge=0,
+        examples=[125000]
+    )
+
+    likes: int = Field(
+        ...,
+        description="Total like count",
+        ge=0,
+        examples=[8500]
+    )
+
+    comments: int = Field(
+        ...,
+        description="Total comment count",
+        ge=0,
+        examples=[1200]
+    )
+
+    engagement_rate: float = Field(
+        ...,
+        description="Engagement rate as percentage ((likes + comments) / views * 100)",
+        ge=0.0,
+        examples=[7.76]
+    )
+
+    published_at: str = Field(
+        ...,
+        description="Video publish date in ISO format",
+        examples=["2026-01-01T12:00:00Z"]
+    )
+
+
+class TopVideosOutput(BaseModel):
+    """
+    Output schema for get_top_videos tool.
+    
+    Contains a list of top-performing videos sorted by the specified metric.
+    """
+
+    videos: list[VideoPerformance] = Field(
+        ...,
+        description="List of top-performing videos"
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "videos": [
+                    {
+                        "video_id": "dQw4w9WgXcQ",
+                        "title": "How to Grow Your YouTube Channel in 2026",
+                        "views": 125000,
+                        "likes": 8500,
+                        "comments": 1200,
+                        "engagement_rate": 7.76,
+                        "published_at": "2026-01-01T12:00:00Z"
+                    },
+                    {
+                        "video_id": "abc123xyz",
+                        "title": "Top 10 Content Creation Tips for Beginners",
+                        "views": 98000,
+                        "likes": 7200,
+                        "comments": 890,
+                        "engagement_rate": 8.26,
+                        "published_at": "2025-12-28T10:30:00Z"
+                    }
+                ]
+            }
+        }
+
+
+# =============================================================================
+# Video Post-Mortem Schemas
+# =============================================================================
+
+class PostMortemCompareWith(str, Enum):
+    """Valid baseline comparison options for video post-mortem."""
+    CHANNEL_AVERAGE = "channel_average"
+    LAST_5_VIDEOS = "last_5_videos"
+
+
+class PostMortemVerdict(str, Enum):
+    """Performance verdict options."""
+    UNDERPERFORMED = "underperformed"
+    OVERPERFORMED = "overperformed"
+    AVERAGE = "average"
+
+
+class VideoPostMortemInput(BaseModel):
+    """
+    Input schema for video_post_mortem tool.
+    
+    Analyzes why a specific video underperformed or overperformed
+    compared to a baseline.
+    """
+
+    video_id: str = Field(
+        ...,
+        description="The YouTube video ID to analyze",
+        min_length=1,
+        max_length=64,
+        examples=["dQw4w9WgXcQ"]
+    )
+
+    compare_with: PostMortemCompareWith = Field(
+        ...,
+        description="Baseline to compare the video against",
+        examples=["channel_average", "last_5_videos"]
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "video_id": "dQw4w9WgXcQ",
+                "compare_with": "channel_average"
+            }
+        }
+
+
+class VideoPostMortemOutput(BaseModel):
+    """
+    Output schema for video_post_mortem tool.
+    
+    Contains data-driven analysis of video performance with
+    actionable recommendations. Each reason maps one-to-one
+    with an action item.
+    
+    Note: This output is designed for paid reports and avoids
+    hallucinating causes not supported by actual data.
+    """
+
+    verdict: PostMortemVerdict = Field(
+        ...,
+        description="Overall performance verdict compared to baseline",
+        examples=["underperformed", "overperformed", "average"]
+    )
+
+    reasons: list[str] = Field(
+        ...,
+        description="Data-driven reasons explaining the verdict. Each reason cites specific metrics.",
+        min_length=1,
+        examples=[
+            [
+                "CTR was 2.8% compared to channel average of 5.2% (-46% below baseline)",
+                "Average view duration was 3.2 minutes vs channel average of 5.8 minutes (-45% retention drop)"
+            ]
+        ]
+    )
+
+    action_items: list[str] = Field(
+        ...,
+        description="Actionable recommendations mapped one-to-one with reasons",
+        min_length=1,
+        examples=[
+            [
+                "Test alternative thumbnail designs with A/B testing to improve CTR above 4%",
+                "Analyze first 30 seconds of video for hook strength; consider restructuring intro"
+            ]
+        ]
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "verdict": "underperformed",
+                "reasons": [
+                    "CTR was 2.8% compared to channel average of 5.2% (-46% below baseline)",
+                    "Average view duration was 3.2 minutes vs channel average of 5.8 minutes (-45% retention drop)",
+                    "Impressions were 40% lower than channel average, indicating reduced algorithmic reach"
+                ],
+                "action_items": [
+                    "Test alternative thumbnail designs with A/B testing to improve CTR above 4%",
+                    "Analyze first 30 seconds of video for hook strength; consider restructuring intro",
+                    "Review title keywords against trending search terms; optimize for discoverability"
+                ]
+            }
+        }
+
+
+# =============================================================================
+# Weekly Growth Report Schemas
+# =============================================================================
+
+class WeeklyGrowthReportInput(BaseModel):
+    """
+    Input schema for weekly_growth_report tool.
+    
+    Generates a concise weekly growth analysis for a YouTube channel
+    with week-over-week comparisons.
+    """
+
+    channel_id: str = Field(
+        ...,
+        description="The YouTube channel ID to analyze",
+        min_length=1,
+        max_length=128,
+        examples=["UC_x5XG1OV2P6uZZ5FSM9Ttw"]
+    )
+
+    week_start: str = Field(
+        ...,
+        description="Start date of the week to analyze (YYYY-MM-DD format)",
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+        examples=["2026-01-01"]
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "channel_id": "UC_x5XG1OV2P6uZZ5FSM9Ttw",
+                "week_start": "2026-01-01"
+            }
+        }
+
+
+class WeeklyGrowthReportOutput(BaseModel):
+    """
+    Output schema for weekly_growth_report tool.
+    
+    Contains a structured weekly growth analysis with concrete,
+    metric-based wins and losses, plus strategic next actions.
+    """
+
+    summary: str = Field(
+        ...,
+        description="Concise summary with week-over-week change metrics",
+        examples=[
+            "Week of Jan 01 - Jan 07, 2026: Your channel showed positive momentum with 48,000 views (+12.5% WoW) and 125 net subscribers (+8.7% WoW). Watch time totaled 2,250 hours."
+        ]
+    )
+
+    wins: list[str] = Field(
+        ...,
+        description="Concrete, metric-based wins from the week",
+        min_length=1,
+        examples=[
+            [
+                "Views increased 12.5% week-over-week (42,000 → 48,000)",
+                "Net subscriber growth up 8.7% (115 → 125 net new)",
+                "CTR improved by 0.4 percentage points (5.1% → 5.5%)"
+            ]
+        ]
+    )
+
+    losses: list[str] = Field(
+        ...,
+        description="Concrete, metric-based losses from the week",
+        min_length=1,
+        examples=[
+            [
+                "Watch time declined 3.2% (2,100 → 2,033 hours)",
+                "Average view duration decreased 0.3 minutes (5.8 → 5.5 min)"
+            ]
+        ]
+    )
+
+    next_actions: list[str] = Field(
+        ...,
+        description="Strategic and actionable recommendations for next week",
+        min_length=1,
+        examples=[
+            [
+                "A/B test 2-3 new thumbnail designs on your next upload to improve CTR",
+                "Review retention graphs for top videos; strengthen intro hooks",
+                "Capitalize on momentum by promoting top performer across social platforms"
+            ]
+        ]
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "summary": "Week of Jan 01 - Jan 07, 2026: Your channel showed positive momentum with 48,000 views (+12.5% WoW) and 125 net subscribers (+8.7% WoW). Watch time totaled 2,250 hours.",
+                "wins": [
+                    "Views increased 12.5% week-over-week (42,000 → 48,000)",
+                    "Net subscriber growth up 8.7% (115 → 125 net new)",
+                    "CTR improved by 0.4 percentage points (5.1% → 5.5%)"
+                ],
+                "losses": [
+                    "Watch time declined 3.2% (2,100 → 2,033 hours)",
+                    "Average view duration decreased 0.3 minutes (5.8 → 5.5 min)"
+                ],
+                "next_actions": [
+                    "A/B test 2-3 new thumbnail designs on your next upload to improve CTR",
+                    "Review retention graphs for top videos; strengthen intro hooks in next content",
+                    "Capitalize on momentum by promoting top performer across social platforms",
+                    "Add stronger CTAs for subscription in video outros and descriptions"
+                ]
+            }
+        }

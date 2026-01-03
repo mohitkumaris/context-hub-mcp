@@ -2,42 +2,42 @@
 MCP Tool Registry.
 
 Registers all available tools with their definitions, schemas,
-and stub implementations. Each tool has:
+and handler implementations. Each tool has:
 - name: Unique identifier
 - description: Human-readable description
 - input_schema: Expected input format
 - output_schema: Expected output format
 - handler: Async function that executes the tool
+
+Tool Categories:
+- analytics: Data fetching and metric computation
+- insight: Data analysis and recommendations
+- report: Report and summary generation
+- memory: Context recall and history search
+- action: Task execution and scheduling
+- search: Data search across sources
+
+Handler implementations are organized in the handlers/ subpackage.
 """
 
 import logging
-from dataclasses import dataclass
-from typing import Any, Callable, Optional, Awaitable
+from typing import Any, Optional
+
+from .base import ToolResult, ToolDefinition
+from .handlers import (
+    AnalyticsHandlers,
+    InsightHandlers,
+    ReportHandlers,
+    MemoryHandlers,
+    ActionHandlers,
+    SearchHandlers,
+    YouTubeHandlers,
+)
 
 logger = logging.getLogger(__name__)
 
-
-@dataclass
-class ToolResult:
-    """Result from a tool execution."""
-
-    tool_name: str
-    success: bool
-    output: Optional[Any] = None
-    error: Optional[str] = None
-
-
-@dataclass
-class ToolDefinition:
-    """Definition of an MCP tool."""
-
-    name: str
-    description: str
-    input_schema: dict[str, Any]
-    output_schema: dict[str, Any]
-    handler: Callable[[dict[str, Any]], Awaitable[Any]]
-    category: str = "general"
-    requires_plan: str = "free"  # Minimum plan required
+# Re-export for backwards compatibility
+__all__ = ["ToolResult", "ToolDefinition", "ToolRegistry"]
 
 
 class ToolRegistry:
@@ -47,6 +47,11 @@ class ToolRegistry:
     Manages tool registration, discovery, and execution.
     Tools are registered at initialization with their schemas
     and handler functions.
+
+    Usage:
+        registry = ToolRegistry()
+        tools = registry.list_tools()
+        result = await registry.execute_tool("fetch_analytics", input_data)
     """
 
     def __init__(self) -> None:
@@ -56,8 +61,20 @@ class ToolRegistry:
 
     def _register_all_tools(self) -> None:
         """Register all available MCP tools."""
+        self._register_analytics_tools()
+        self._register_insight_tools()
+        self._register_report_tools()
+        self._register_memory_tools()
+        self._register_action_tools()
+        self._register_search_tools()
+        self._register_youtube_tools()
 
-        # Analytics Tools
+    # =========================================================================
+    # Analytics Tools
+    # =========================================================================
+
+    def _register_analytics_tools(self) -> None:
+        """Register analytics-related tools."""
         self._register_tool(ToolDefinition(
             name="fetch_analytics",
             description="Fetch analytics data for a channel or time period",
@@ -79,7 +96,7 @@ class ToolRegistry:
                     "metrics": {"type": "object"}
                 }
             },
-            handler=self._fetch_analytics_handler,
+            handler=AnalyticsHandlers.fetch_analytics,
             category="analytics",
             requires_plan="free"
         ))
@@ -104,7 +121,7 @@ class ToolRegistry:
                     "trends": {"type": "array"}
                 }
             },
-            handler=self._compute_metrics_handler,
+            handler=AnalyticsHandlers.compute_metrics,
             category="analytics",
             requires_plan="pro"
         ))
@@ -130,12 +147,17 @@ class ToolRegistry:
                     "datasets": {"type": "array"}
                 }
             },
-            handler=self._generate_chart_handler,
+            handler=AnalyticsHandlers.generate_chart,
             category="analytics",
             requires_plan="pro"
         ))
 
-        # Insight Tools
+    # =========================================================================
+    # Insight Tools
+    # =========================================================================
+
+    def _register_insight_tools(self) -> None:
+        """Register insight-related tools."""
         self._register_tool(ToolDefinition(
             name="analyze_data",
             description="Perform deep analysis on channel data",
@@ -157,7 +179,7 @@ class ToolRegistry:
                     "confidence": {"type": "number"}
                 }
             },
-            handler=self._analyze_data_handler,
+            handler=InsightHandlers.analyze_data,
             category="insight",
             requires_plan="pro"
         ))
@@ -182,7 +204,7 @@ class ToolRegistry:
                     "action_items": {"type": "array"}
                 }
             },
-            handler=self._generate_insight_handler,
+            handler=InsightHandlers.generate_insight,
             category="insight",
             requires_plan="pro"
         ))
@@ -207,12 +229,17 @@ class ToolRegistry:
                     "expected_impact": {"type": "string"}
                 }
             },
-            handler=self._get_recommendations_handler,
+            handler=InsightHandlers.get_recommendations,
             category="insight",
             requires_plan="agency"
         ))
 
-        # Report Tools
+    # =========================================================================
+    # Report Tools
+    # =========================================================================
+
+    def _register_report_tools(self) -> None:
+        """Register report-related tools."""
         self._register_tool(ToolDefinition(
             name="generate_report",
             description="Generate a comprehensive report",
@@ -235,7 +262,7 @@ class ToolRegistry:
                     "generated_at": {"type": "string"}
                 }
             },
-            handler=self._generate_report_handler,
+            handler=ReportHandlers.generate_report,
             category="report",
             requires_plan="pro"
         ))
@@ -261,12 +288,17 @@ class ToolRegistry:
                     "word_count": {"type": "integer"}
                 }
             },
-            handler=self._summarize_data_handler,
+            handler=ReportHandlers.summarize_data,
             category="report",
             requires_plan="free"
         ))
 
-        # Memory Tools
+    # =========================================================================
+    # Memory Tools
+    # =========================================================================
+
+    def _register_memory_tools(self) -> None:
+        """Register memory-related tools."""
         self._register_tool(ToolDefinition(
             name="recall_context",
             description="Recall relevant context from conversation history",
@@ -288,7 +320,7 @@ class ToolRegistry:
                     "has_more": {"type": "boolean"}
                 }
             },
-            handler=self._recall_context_handler,
+            handler=MemoryHandlers.recall_context,
             category="memory",
             requires_plan="free"
         ))
@@ -314,12 +346,17 @@ class ToolRegistry:
                     "relevance_scores": {"type": "array"}
                 }
             },
-            handler=self._search_history_handler,
+            handler=MemoryHandlers.search_history,
             category="memory",
             requires_plan="pro"
         ))
 
-        # Action Tools
+    # =========================================================================
+    # Action Tools
+    # =========================================================================
+
+    def _register_action_tools(self) -> None:
+        """Register action-related tools."""
         self._register_tool(ToolDefinition(
             name="execute_action",
             description="Execute a specific action on behalf of the user",
@@ -341,7 +378,7 @@ class ToolRegistry:
                     "message": {"type": "string"}
                 }
             },
-            handler=self._execute_action_handler,
+            handler=ActionHandlers.execute_action,
             category="action",
             requires_plan="agency"
         ))
@@ -368,12 +405,17 @@ class ToolRegistry:
                     "next_run": {"type": "string"}
                 }
             },
-            handler=self._schedule_task_handler,
+            handler=ActionHandlers.schedule_task,
             category="action",
             requires_plan="agency"
         ))
 
-        # Search Tools
+    # =========================================================================
+    # Search Tools
+    # =========================================================================
+
+    def _register_search_tools(self) -> None:
+        """Register search-related tools."""
         self._register_tool(ToolDefinition(
             name="search_data",
             description="Search across all available data sources",
@@ -395,10 +437,205 @@ class ToolRegistry:
                     "total_matches": {"type": "integer"}
                 }
             },
-            handler=self._search_data_handler,
+            handler=SearchHandlers.search_data,
             category="search",
             requires_plan="free"
         ))
+
+    # =========================================================================
+    # YouTube Tools
+    # =========================================================================
+
+    def _register_youtube_tools(self) -> None:
+        """Register YouTube-specific analytics tools."""
+        self._register_tool(ToolDefinition(
+            name="get_channel_snapshot",
+            description="Provide a summarized snapshot of a YouTube channel's performance for a given time period. Returns key metrics including subscribers, views, video count, CTR, and watch time.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "channel_id": {
+                        "type": "string",
+                        "description": "The YouTube channel ID to get snapshot for"
+                    },
+                    "period": {
+                        "type": "string",
+                        "enum": ["last_7_days", "last_30_days", "last_90_days"],
+                        "description": "Time period for the snapshot"
+                    }
+                },
+                "required": ["channel_id", "period"]
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "subscribers": {"type": "integer", "description": "Total subscriber count"},
+                    "views": {"type": "integer", "description": "Total views in the period"},
+                    "videos": {"type": "integer", "description": "Number of videos published in the period"},
+                    "avg_ctr": {"type": "number", "description": "Average click-through rate (percentage)"},
+                    "avg_watch_time_minutes": {"type": "number", "description": "Average watch time in minutes"},
+                    "period": {"type": "string", "description": "The time period for this snapshot"}
+                },
+                "required": ["subscribers", "views", "videos", "avg_ctr", "avg_watch_time_minutes", "period"]
+            },
+            handler=YouTubeHandlers.get_channel_snapshot,
+            category="analytics",
+            requires_plan="free"
+        ))
+
+        self._register_tool(ToolDefinition(
+            name="get_top_videos",
+            description="Return top-performing videos for a YouTube channel over a time period. Enables cross-video reasoning by providing detailed metrics for each video sorted by the specified criteria.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "channel_id": {
+                        "type": "string",
+                        "description": "The YouTube channel ID to get top videos for"
+                    },
+                    "period": {
+                        "type": "string",
+                        "enum": ["last_7_days", "last_30_days"],
+                        "description": "Time period for video performance analysis"
+                    },
+                    "sort_by": {
+                        "type": "string",
+                        "enum": ["views", "engagement", "ctr"],
+                        "description": "Metric to sort videos by"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50,
+                        "default": 10,
+                        "description": "Maximum number of videos to return"
+                    }
+                },
+                "required": ["channel_id", "period", "sort_by", "limit"]
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "videos": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "video_id": {"type": "string", "description": "YouTube video ID"},
+                                "title": {"type": "string", "description": "Video title"},
+                                "views": {"type": "integer", "description": "Total view count"},
+                                "likes": {"type": "integer", "description": "Total like count"},
+                                "comments": {"type": "integer", "description": "Total comment count"},
+                                "engagement_rate": {"type": "number", "description": "Engagement rate as percentage"},
+                                "published_at": {"type": "string", "format": "date-time", "description": "Video publish date in ISO format"}
+                            },
+                            "required": ["video_id", "title", "views", "likes", "comments", "engagement_rate", "published_at"]
+                        },
+                        "description": "List of top-performing videos"
+                    }
+                },
+                "required": ["videos"]
+            },
+            handler=YouTubeHandlers.get_top_videos,
+            category="analytics",
+            requires_plan="free"
+        ))
+
+        self._register_tool(ToolDefinition(
+            name="video_post_mortem",
+            description="Analyze why a specific video underperformed or overperformed compared to a baseline. Provides data-driven reasons and actionable recommendations without hallucinating causes.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "video_id": {
+                        "type": "string",
+                        "description": "The YouTube video ID to analyze"
+                    },
+                    "compare_with": {
+                        "type": "string",
+                        "enum": ["channel_average", "last_5_videos"],
+                        "description": "Baseline to compare the video against"
+                    }
+                },
+                "required": ["video_id", "compare_with"]
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "verdict": {
+                        "type": "string",
+                        "enum": ["underperformed", "overperformed", "average"],
+                        "description": "Overall performance verdict compared to baseline"
+                    },
+                    "reasons": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Data-driven reasons explaining the verdict"
+                    },
+                    "action_items": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Actionable recommendations mapped one-to-one with reasons"
+                    }
+                },
+                "required": ["verdict", "reasons", "action_items"]
+            },
+            handler=YouTubeHandlers.video_post_mortem,
+            category="insight",
+            requires_plan="pro"
+        ))
+
+        self._register_tool(ToolDefinition(
+            name="weekly_growth_report",
+            description="Generate a concise weekly growth analysis for a YouTube channel. Provides week-over-week comparison with concrete wins, losses, and strategic next actions.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "channel_id": {
+                        "type": "string",
+                        "description": "The YouTube channel ID to analyze"
+                    },
+                    "week_start": {
+                        "type": "string",
+                        "format": "date",
+                        "description": "Start date of the week to analyze (YYYY-MM-DD format)"
+                    }
+                },
+                "required": ["channel_id", "week_start"]
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string",
+                        "description": "Concise summary with week-over-week change metrics"
+                    },
+                    "wins": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Concrete, metric-based wins from the week"
+                    },
+                    "losses": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Concrete, metric-based losses from the week"
+                    },
+                    "next_actions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Strategic and actionable recommendations for next week"
+                    }
+                },
+                "required": ["summary", "wins", "losses", "next_actions"]
+            },
+            handler=YouTubeHandlers.weekly_growth_report,
+            category="report",
+            requires_plan="pro"
+        ))
+
+    # =========================================================================
+    # Registry Methods
+    # =========================================================================
 
     def _register_tool(self, tool: ToolDefinition) -> None:
         """Register a tool in the registry."""
@@ -469,178 +706,3 @@ class ToolRegistry:
                 success=False,
                 error=str(e)
             )
-
-    # =========================================================================
-    # Stub Handler Implementations
-    # =========================================================================
-
-    async def _fetch_analytics_handler(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        """Stub: Fetch analytics data."""
-        # TODO: Implement actual analytics fetching
-        return {
-            "data": {
-                "views": 15420,
-                "subscribers": 1250,
-                "engagement": 8.5,
-                "watch_time": 45000
-            },
-            "period": "7d",
-            "metrics": {
-                "avg_views_per_day": 2203,
-                "subscriber_growth": 3.2
-            }
-        }
-
-    async def _compute_metrics_handler(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        """Stub: Compute derived metrics."""
-        # TODO: Implement actual metric computation
-        return {
-            "growth_rate": 15.2,
-            "engagement_rate": 8.5,
-            "trends": ["increasing_views", "stable_subscribers"]
-        }
-
-    async def _generate_chart_handler(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        """Stub: Generate chart data."""
-        # TODO: Implement actual chart generation
-        return {
-            "chart_type": "line",
-            "labels": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
-            "datasets": [
-                {
-                    "label": "Views",
-                    "data": [1200, 1900, 1500, 2100, 2400, 2200, 2100]
-                }
-            ]
-        }
-
-    async def _analyze_data_handler(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        """Stub: Analyze data."""
-        # TODO: Implement actual data analysis
-        return {
-            "analysis": "Channel shows strong growth trajectory",
-            "key_findings": [
-                "Peak engagement on weekends",
-                "Strong audience retention",
-                "Growing subscriber base"
-            ],
-            "confidence": 0.85
-        }
-
-    async def _generate_insight_handler(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        """Stub: Generate insights."""
-        # TODO: Implement actual insight generation
-        return {
-            "insights": [
-                "Your weekend content performs 40% better",
-                "Shorts are driving subscriber growth",
-                "Engagement peaks at 7 PM local time"
-            ],
-            "priority": "high",
-            "action_items": [
-                "Post more content on weekends",
-                "Increase shorts production",
-                "Schedule posts for evening"
-            ]
-        }
-
-    async def _get_recommendations_handler(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        """Stub: Get recommendations."""
-        # TODO: Implement actual recommendation engine
-        return {
-            "recommendations": [
-                "Create a series format for your top-performing topic",
-                "Collaborate with channels in similar niche",
-                "Optimize thumbnails for mobile viewing"
-            ],
-            "rationale": "Based on your growth patterns and audience behavior",
-            "expected_impact": "15-25% increase in engagement"
-        }
-
-    async def _generate_report_handler(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        """Stub: Generate report."""
-        # TODO: Implement actual report generation
-        from datetime import datetime
-
-        return {
-            "title": "Weekly Performance Report",
-            "summary": "Strong week with 15% growth in views",
-            "sections": [
-                {"name": "Overview", "content": "Key metrics summary"},
-                {"name": "Engagement", "content": "Audience interaction analysis"},
-                {"name": "Growth", "content": "Subscriber and view trends"}
-            ],
-            "generated_at": datetime.utcnow().isoformat()
-        }
-
-    async def _summarize_data_handler(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        """Stub: Summarize data."""
-        # TODO: Implement actual summarization
-        return {
-            "summary": "Your channel had a strong week with 15K views and 50 new subscribers.",
-            "highlights": [
-                "15,420 total views",
-                "50 new subscribers",
-                "8.5% engagement rate"
-            ],
-            "word_count": 15
-        }
-
-    async def _recall_context_handler(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        """Stub: Recall context from memory."""
-        # TODO: Implement actual context recall
-        context = input_data.get("context", {})
-        history = context.get("conversation_history", [])
-
-        return {
-            "results": history[-5:] if history else [],
-            "total_count": len(history),
-            "has_more": len(history) > 5
-        }
-
-    async def _search_history_handler(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        """Stub: Search history."""
-        # TODO: Implement actual history search
-        return {
-            "results": [
-                {"type": "conversation", "content": "Previous discussion about growth"},
-                {"type": "insight", "content": "Generated insight from last week"}
-            ],
-            "total_count": 2,
-            "relevance_scores": [0.95, 0.82]
-        }
-
-    async def _execute_action_handler(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        """Stub: Execute action."""
-        # TODO: Implement actual action execution
-        action_type = input_data.get("action_type", "unknown")
-
-        return {
-            "executed": False,
-            "result": None,
-            "message": f"Action '{action_type}' requires user confirmation (stub implementation)"
-        }
-
-    async def _schedule_task_handler(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        """Stub: Schedule task."""
-        # TODO: Implement actual task scheduling
-        import uuid
-        from datetime import datetime, timedelta
-
-        return {
-            "scheduled": True,
-            "task_id": str(uuid.uuid4()),
-            "next_run": (datetime.utcnow() + timedelta(days=1)).isoformat()
-        }
-
-    async def _search_data_handler(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        """Stub: Search data."""
-        # TODO: Implement actual data search
-        return {
-            "results": [
-                {"source": "analytics", "match": "Performance data"},
-                {"source": "history", "match": "Previous conversation"}
-            ],
-            "sources_searched": ["analytics", "history", "insights"],
-            "total_matches": 2
-        }
