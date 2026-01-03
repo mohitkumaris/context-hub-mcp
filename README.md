@@ -15,30 +15,39 @@ The **Model Context Protocol** is an architectural pattern for building AI-power
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        FastAPI Server                           │
-│                         POST /execute                           │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     Executor (Orchestrator)                      │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │   Planner   │  │   Execute   │  │       Formatter         │  │
-│  │  (Intent)   │──│   (Tools)   │──│   (Response)            │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-        │                   │                      │
-        ▼                   ▼                      ▼
-┌───────────────┐  ┌───────────────┐  ┌─────────────────────────┐
-│   Registry    │  │    Memory     │  │        Prompts          │
-│  ┌─────────┐  │  │  ┌─────────┐  │  │  ┌─────────────────┐    │
-│  │  Tools  │  │  │  │  Redis  │  │  │  │  system.txt     │    │
-│  │ Schemas │  │  │  │ (short) │  │  │  │  analysis.txt   │    │
-│  │Policies │  │  │  │Postgres │  │  │  └─────────────────┘    │
-│  └─────────┘  │  │  │ (long)  │  │  └─────────────────────────┘
-└───────────────┘  │  └─────────┘  │
-                   └───────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                           FastAPI Server                                 │
+│                     POST /execute  |  GET /health                        │
+└──────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│                        Executor (Orchestrator)                           │
+│  ┌──────────────┐   ┌──────────────┐   ┌──────────────────────────────┐  │
+│  │   Planner    │   │   Execute    │   │         Formatter            │  │
+│  │  (Intent &   │──▶│   (Tools)    │──▶│   (Response & Content)       │  │
+│  │   Planning)  │   │              │   │                              │  │
+│  └──────────────┘   └──────────────┘   └──────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────────┘
+         │                    │                         │
+         ▼                    ▼                         ▼
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────────┐
+│    Registry     │  │     Memory      │  │          Prompts            │
+│  ┌───────────┐  │  │  ┌───────────┐  │  │  ┌───────────────────────┐  │
+│  │   Tools   │  │  │  │   Redis   │  │  │  │    system.txt         │  │
+│  │  (17 tools│  │  │  │  (short)  │  │  │  │    analysis.txt       │  │
+│  │  Registry)│  │  │  └───────────┘  │  │  └───────────────────────┘  │
+│  ├───────────┤  │  │  ┌───────────┐  │  └─────────────────────────────┘
+│  │ Handlers  │  │  │  │ Postgres  │  │
+│  │ (modular) │  │  │  │  (long)   │  │
+│  ├───────────┤  │  │  └───────────┘  │
+│  │  Schemas  │  │  └─────────────────┘
+│  ├───────────┤  │
+│  │ Policies  │  │
+│  │(FREE/PRO/ │  │
+│  │  AGENCY)  │  │
+│  └───────────┘  │
+└─────────────────┘
 ```
 
 ## Features
@@ -65,14 +74,27 @@ context-hub-mcp/
 │   ├── planner.py         # Intent classification & tool planning
 │   └── formatter.py       # Response formatting
 │
-├── registry/              # Tool and schema definitions
-│   ├── tools.py           # Tool registry with implementations
+├── registry/              # Tool registry and definitions (modular)
+│   ├── base.py            # Core classes (ToolResult, ToolDefinition)
+│   ├── tools.py           # Tool registry with 17 tools
 │   ├── schemas.py         # Pydantic request/response models
-│   └── policies.py        # Plan-based access control
+│   ├── policies.py        # Plan-based access control (FREE/PRO/AGENCY)
+│   └── handlers/          # Handler implementations by category
+│       ├── analytics.py   # fetch_analytics, compute_metrics, generate_chart
+│       ├── insight.py     # analyze_data, generate_insight, get_recommendations
+│       ├── report.py      # generate_report, summarize_data
+│       ├── memory.py      # recall_context, search_history
+│       ├── action.py      # execute_action, schedule_task
+│       ├── search.py      # search_data
+│       └── youtube.py     # get_channel_snapshot, get_top_videos,
+│                          # video_post_mortem, weekly_growth_report
 │
 ├── memory/                # Data persistence
 │   ├── redis_store.py     # Short-term memory (conversations)
 │   └── postgres_store.py  # Long-term memory (analytics)
+│
+├── tests/                 # Unit tests
+│   └── test_server.py     # Server endpoint tests (37 tests)
 │
 └── prompts/               # LLM prompt templates
     ├── system.txt         # Core system prompt
