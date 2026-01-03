@@ -201,11 +201,80 @@ docker-compose up -d
 
 ## API Reference
 
+### Base URL
+
+```
+http://localhost:8000
+```
+
+### Endpoints Overview
+
+| Method | Endpoint   | Description                              |
+| ------ | ---------- | ---------------------------------------- |
+| GET    | `/`        | Root endpoint with API info              |
+| GET    | `/health`  | Health check for container orchestration |
+| POST   | `/execute` | Main execution endpoint                  |
+| GET    | `/docs`    | Swagger UI (debug mode only)             |
+| GET    | `/redoc`   | ReDoc documentation (debug mode only)    |
+
+---
+
+### GET /
+
+Root endpoint with API information.
+
+**Request:**
+
+```
+GET http://localhost:8000/
+```
+
+**Response:**
+
+```json
+{
+  "service": "Context Hub MCP Server",
+  "version": "1.0.0",
+  "docs": "/docs"
+}
+```
+
+---
+
+### GET /health
+
+Health check endpoint for container orchestration.
+
+**Request:**
+
+```
+GET http://localhost:8000/health
+```
+
+**Response:**
+
+```json
+{
+  "status": "healthy",
+  "version": "1.0.0",
+  "llm_provider": "openai"
+}
+```
+
+---
+
 ### POST /execute
 
 Execute a context request with tool orchestration.
 
 **Request:**
+
+```
+POST http://localhost:8000/execute
+Content-Type: application/json
+```
+
+**Request Body:**
 
 ```json
 {
@@ -244,18 +313,530 @@ Execute a context request with tool orchestration.
 }
 ```
 
-### GET /health
+---
 
-Health check endpoint for container orchestration.
+## Postman Collection
 
-**Response:**
+### Import Instructions
+
+1. Open Postman
+2. Click **Import** → **Raw text**
+3. Paste the JSON below and import
+
+### Postman Collection JSON
 
 ```json
 {
-  "status": "healthy",
-  "version": "1.0.0",
-  "llm_provider": "openai"
+  "info": {
+    "name": "Context Hub MCP Server",
+    "description": "API collection for Context Hub MCP Server - AI agent context orchestration",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "System",
+      "item": [
+        {
+          "name": "Root - API Info",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/",
+              "host": ["{{base_url}}"],
+              "path": [""]
+            },
+            "description": "Get API information and version"
+          }
+        },
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Check server health status"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Execute - Analytics",
+      "item": [
+        {
+          "name": "Get Channel Analytics",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Show me my channel analytics for last week\",\n  \"metadata\": {\n    \"user_plan\": \"free\",\n    \"timezone\": \"UTC\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Fetch analytics data for a channel"
+          }
+        },
+        {
+          "name": "Get View Statistics",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"How many views did I get this month?\",\n  \"metadata\": {\n    \"user_plan\": \"pro\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Get view statistics and metrics"
+          }
+        },
+        {
+          "name": "Compare Performance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Compare my performance this week versus last week\",\n  \"metadata\": {\n    \"user_plan\": \"pro\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Compare performance across time periods"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Execute - Insights",
+      "item": [
+        {
+          "name": "Get Growth Insights",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Give me insights on my channel growth\",\n  \"metadata\": {\n    \"user_plan\": \"pro\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Generate growth insights and recommendations"
+          }
+        },
+        {
+          "name": "Get Recommendations",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"What should I do to improve my engagement?\",\n  \"metadata\": {\n    \"user_plan\": \"agency\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Get personalized recommendations (Agency tier)"
+          }
+        },
+        {
+          "name": "Why Analysis",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Why did my views drop last week?\",\n  \"metadata\": {\n    \"user_plan\": \"pro\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Analyze reasons behind performance changes"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Execute - Reports",
+      "item": [
+        {
+          "name": "Weekly Performance Report",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Generate a weekly performance report\",\n  \"metadata\": {\n    \"user_plan\": \"pro\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Generate comprehensive weekly report"
+          }
+        },
+        {
+          "name": "Monthly Summary",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Give me a summary of last month\",\n  \"metadata\": {\n    \"user_plan\": \"pro\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Get monthly performance summary"
+          }
+        },
+        {
+          "name": "Catch Me Up",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Catch me up on what happened this week\",\n  \"metadata\": {\n    \"user_plan\": \"free\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Quick recap of recent activity"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Execute - Memory",
+      "item": [
+        {
+          "name": "Recall Previous Discussion",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"What did we discuss earlier about my thumbnails?\",\n  \"metadata\": {\n    \"user_plan\": \"free\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Recall context from previous conversations"
+          }
+        },
+        {
+          "name": "Search History",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Find all the times we talked about engagement\",\n  \"metadata\": {\n    \"user_plan\": \"pro\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Search through conversation history"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Execute - Actions",
+      "item": [
+        {
+          "name": "Schedule Task",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Schedule a weekly analytics report every Monday\",\n  \"metadata\": {\n    \"user_plan\": \"agency\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Schedule automated tasks (Agency tier)"
+          }
+        },
+        {
+          "name": "Execute Action",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Create a content calendar for next week\",\n  \"metadata\": {\n    \"user_plan\": \"agency\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Execute specific actions (Agency tier)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Execute - Search",
+      "item": [
+        {
+          "name": "Search Data",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Find my best performing videos\",\n  \"metadata\": {\n    \"user_plan\": \"free\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Search across all data sources"
+          }
+        },
+        {
+          "name": "List Content",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Show me all my videos from last month\",\n  \"metadata\": {\n    \"user_plan\": \"free\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "List and display content"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Plan Tier Tests",
+      "item": [
+        {
+          "name": "Free Tier Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"free_user\",\n  \"channel_id\": \"channel_free\",\n  \"message\": \"Show me my analytics\",\n  \"metadata\": {\n    \"user_plan\": \"free\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Test with Free tier access"
+          }
+        },
+        {
+          "name": "Pro Tier Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"pro_user\",\n  \"channel_id\": \"channel_pro\",\n  \"message\": \"Generate a detailed report with charts\",\n  \"metadata\": {\n    \"user_plan\": \"pro\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Test with Pro tier access"
+          }
+        },
+        {
+          "name": "Agency Tier Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"agency_user\",\n  \"channel_id\": \"channel_agency\",\n  \"message\": \"Schedule a task and give me recommendations\",\n  \"metadata\": {\n    \"user_plan\": \"agency\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Test with Agency tier access (all tools)"
+          }
+        }
+      ]
+    }
+  ]
 }
+```
+
+### Quick Test URLs
+
+After starting the server with `DEBUG=true python server.py`, test these URLs:
+
+| Endpoint     | URL                                    |
+| ------------ | -------------------------------------- |
+| Root         | `http://localhost:8000/`               |
+| Health       | `http://localhost:8000/health`         |
+| Swagger Docs | `http://localhost:8000/docs`           |
+| ReDoc        | `http://localhost:8000/redoc`          |
+| Execute      | `http://localhost:8000/execute` (POST) |
+
+### Sample cURL Commands
+
+**Health Check:**
+
+```bash
+curl http://localhost:8000/health
+```
+
+**Execute Request:**
+
+```bash
+curl -X POST http://localhost:8000/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user_123",
+    "channel_id": "channel_456",
+    "message": "Show me my analytics",
+    "metadata": {"user_plan": "pro"}
+  }'
 ```
 
 ## Configuration
