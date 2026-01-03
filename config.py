@@ -1,0 +1,133 @@
+"""
+Centralized configuration for the MCP server.
+
+Loads all environment variables and provides typed configuration objects.
+No hardcoded secrets - all sensitive values must come from environment.
+"""
+
+import os
+from typing import Optional
+from dataclasses import dataclass, field
+
+
+@dataclass
+class RedisConfig:
+    """Redis connection configuration for short-term memory."""
+
+    host: str = field(default_factory=lambda: os.getenv(
+        "REDIS_HOST", "localhost"))
+    port: int = field(default_factory=lambda: int(
+        os.getenv("REDIS_PORT", "6379")))
+    password: Optional[str] = field(
+        default_factory=lambda: os.getenv("REDIS_PASSWORD"))
+    db: int = field(default_factory=lambda: int(os.getenv("REDIS_DB", "0")))
+    ssl: bool = field(default_factory=lambda: os.getenv(
+        "REDIS_SSL", "false").lower() == "true")
+
+    @property
+    def url(self) -> str:
+        """Build Redis connection URL."""
+        protocol = "rediss" if self.ssl else "redis"
+        auth = f":{self.password}@" if self.password else ""
+        return f"{protocol}://{auth}{self.host}:{self.port}/{self.db}"
+
+
+@dataclass
+class PostgresConfig:
+    """PostgreSQL connection configuration for long-term memory."""
+
+    host: str = field(default_factory=lambda: os.getenv(
+        "POSTGRES_HOST", "localhost"))
+    port: int = field(default_factory=lambda: int(
+        os.getenv("POSTGRES_PORT", "5432")))
+    user: str = field(
+        default_factory=lambda: os.getenv("POSTGRES_USER", "mcp"))
+    password: Optional[str] = field(
+        default_factory=lambda: os.getenv("POSTGRES_PASSWORD"))
+    database: str = field(default_factory=lambda: os.getenv(
+        "POSTGRES_DB", "context_hub"))
+    ssl_mode: str = field(default_factory=lambda: os.getenv(
+        "POSTGRES_SSL_MODE", "prefer"))
+
+    @property
+    def url(self) -> str:
+        """Build PostgreSQL connection URL."""
+        auth = f"{self.user}:{self.password}@" if self.password else f"{self.user}@"
+        return f"postgresql+asyncpg://{auth}{self.host}:{self.port}/{self.database}?ssl={self.ssl_mode}"
+
+
+@dataclass
+class LLMConfig:
+    """LLM provider configuration - agnostic to specific providers."""
+
+    provider: str = field(
+        default_factory=lambda: os.getenv("LLM_PROVIDER", "openai"))
+    api_key: Optional[str] = field(
+        default_factory=lambda: os.getenv("LLM_API_KEY"))
+    model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", "gpt-4"))
+    base_url: Optional[str] = field(
+        default_factory=lambda: os.getenv("LLM_BASE_URL"))
+    max_tokens: int = field(default_factory=lambda: int(
+        os.getenv("LLM_MAX_TOKENS", "4096")))
+    temperature: float = field(default_factory=lambda: float(
+        os.getenv("LLM_TEMPERATURE", "0.7")))
+    timeout: int = field(default_factory=lambda: int(
+        os.getenv("LLM_TIMEOUT", "60")))
+
+
+@dataclass
+class ServerConfig:
+    """Server runtime configuration."""
+
+    host: str = field(default_factory=lambda: os.getenv(
+        "SERVER_HOST", "0.0.0.0"))
+    port: int = field(default_factory=lambda: int(
+        os.getenv("SERVER_PORT", "8000")))
+    debug: bool = field(default_factory=lambda: os.getenv(
+        "DEBUG", "false").lower() == "true")
+    log_level: str = field(
+        default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
+    cors_origins: list[str] = field(
+        default_factory=lambda: os.getenv("CORS_ORIGINS", "*").split(",")
+    )
+
+
+@dataclass
+class Config:
+    """
+    Root configuration object aggregating all config sections.
+
+    Usage:
+        config = Config()
+        redis_url = config.redis.url
+        llm_model = config.llm.model
+    """
+
+    redis: RedisConfig = field(default_factory=RedisConfig)
+    postgres: PostgresConfig = field(default_factory=PostgresConfig)
+    llm: LLMConfig = field(default_factory=LLMConfig)
+    server: ServerConfig = field(default_factory=ServerConfig)
+
+    def validate(self) -> list[str]:
+        """
+        Validate configuration and return list of warnings/errors.
+
+        Returns:
+            List of validation messages (empty if all valid)
+        """
+        warnings = []
+
+        if not self.llm.api_key:
+            warnings.append("LLM_API_KEY not set - LLM calls will fail")
+
+        if not self.redis.password and not self.server.debug:
+            warnings.append("REDIS_PASSWORD not set in production mode")
+
+        if not self.postgres.password and not self.server.debug:
+            warnings.append("POSTGRES_PASSWORD not set in production mode")
+
+        return warnings
+
+
+# Global config instance - import and use this
+config = Config()
