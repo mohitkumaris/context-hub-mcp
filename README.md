@@ -89,6 +89,18 @@ context-hub-mcp/
 │       └── youtube.py     # get_channel_snapshot, get_top_videos,
 │                          # video_post_mortem, weekly_growth_report
 │
+├── db/                    # Database models and session management
+│   ├── __init__.py        # Package exports
+│   ├── base.py            # SQLAlchemy Base, TimestampMixin
+│   ├── session.py         # Async engine, session factory, get_db()
+│   └── models/            # SQLAlchemy ORM models
+│       ├── user.py        # User with subscription plans (FREE/PRO/AGENCY)
+│       ├── channel.py     # YouTube channel linked to user
+│       ├── analytics_snapshot.py  # Channel analytics (7/30/90 days)
+│       ├── video_snapshot.py      # Individual video metrics
+│       ├── weekly_insight.py      # Weekly growth reports
+│       └── chat_session.py        # Conversation history/context
+│
 ├── memory/                # Data persistence
 │   ├── redis_store.py     # Short-term memory (conversations)
 │   └── postgres_store.py  # Long-term memory (analytics)
@@ -99,6 +111,15 @@ context-hub-mcp/
 └── prompts/               # LLM prompt templates
     ├── system.txt         # Core system prompt
     └── analysis.txt       # Deep analysis mode prompt
+```
+
+### Database Model Relationships
+
+```
+User ──┬── Channel ──┬── AnalyticsSnapshot
+       │             ├── VideoSnapshot
+       │             └── WeeklyInsight
+       └── ChatSession
 ```
 
 ## Quick Start

@@ -1,35 +1,43 @@
+# =============================================================================
 # Python dependencies for context-hub-mcp
-# Production-grade MCP server
+# Production-grade MCP server for AI agent context orchestration
+# =============================================================================
 
 # Web Framework
-fastapi>=0.109.0
-uvicorn[standard]>=0.27.0
-pydantic>=2.5.0
+fastapi>=0.109.0                # High-performance async web framework
+uvicorn[standard]>=0.27.0       # ASGI server for FastAPI
+pydantic>=2.5.0                 # Data validation and serialization
 
 # Database
-asyncpg>=0.29.0
-sqlalchemy[asyncio]>=2.0.25
-redis>=5.0.0
+asyncpg>=0.29.0                 # Async PostgreSQL driver for SQLAlchemy
+sqlalchemy[asyncio]>=2.0.25     # SQL toolkit and ORM with async support
+redis>=5.0.0                    # In-memory data store for short-term memory
+alembic>=1.13.0                 # Database migration tool for SQLAlchemy
+psycopg2-binary>=2.9.9          # PostgreSQL adapter (sync, for Alembic)
 
-# HTTP Client (for LLM API calls)
-httpx>=0.26.0
-aiohttp>=3.9.0
+# HTTP Client
+httpx>=0.26.0                   # Modern async HTTP client for LLM API calls
+aiohttp>=3.9.0                  # Async HTTP client/server framework
 
 # Configuration
-python-dotenv>=1.0.0
+python-dotenv>=1.0.0            # Load environment variables from .env file
 
 # Utilities
-orjson>=3.9.0
-python-dateutil>=2.8.2
+orjson>=3.9.0                   # Fast JSON serialization/deserialization
+python-dateutil>=2.8.2          # Date/time parsing and manipulation
 
 # Logging & Monitoring
-structlog>=24.1.0
+structlog>=24.1.0               # Structured logging with context
 
-# Type checking (dev)
-# mypy>=1.8.0
-# types-redis>=4.6.0
+# =============================================================================
+# Development Dependencies (uncomment as needed)
+# =============================================================================
 
-# Testing (dev)
-# pytest>=7.4.0
-# pytest-asyncio>=0.23.0
-# pytest-cov>=4.1.0
+# Type checking
+# mypy>=1.8.0                   # Static type checker for Python
+# types-redis>=4.6.0            # Type stubs for redis
+
+# Testing
+# pytest>=7.4.0                 # Testing framework
+# pytest-asyncio>=0.23.0        # Async test support for pytest
+# pytest-cov>=4.1.0             # Code coverage reporting
