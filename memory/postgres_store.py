@@ -1,19 +1,23 @@
 """
 PostgreSQL-based long-term memory store.
 
-Handles:
-- Channel snapshots
+Provides persistent storage for:
+- Analytics snapshots
 - Weekly insights
-- Historical analytics
-- Persistent user data
+- Chat session history
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Any, Optional
-from uuid import uuid4
+from typing import Optional
+from uuid import UUID
 
-from config import config
+from sqlalchemy import desc
+from sqlalchemy.orm import Session
+
+from db.session import SessionLocal
+from db.models.analytics_snapshot import AnalyticsSnapshot
+from db.models.weekly_insight import WeeklyInsight
+from db.models.chat_session import ChatSession
 
 logger = logging.getLogger(__name__)
 
@@ -22,363 +26,190 @@ class PostgresMemoryStore:
     """
     Long-term memory store using PostgreSQL.
 
-    Manages persistent data:
-    - Channel performance snapshots
-    - Historical insights
-    - Analytics time series
-    - User preferences and settings
+    Provides read and write access to persistent MCP data:
+    - Channel analytics snapshots
+    - Weekly growth insights
+    - User chat session history
     """
 
     def __init__(self) -> None:
-        """Initialize the PostgreSQL store."""
-        self._engine: Optional[Any] = None
-        self._session_factory: Optional[Any] = None
-        self._connected = False
-        # In-memory fallback for when DB is not available
-        self._fallback_store: dict[str, Any] = {}
+        """Initialize the PostgreSQL memory store."""
+        logger.info("PostgresMemoryStore initialized")
 
-    async def _ensure_connection(self) -> bool:
+    def _get_session(self) -> Session:
+        """Create a new database session."""
+        return SessionLocal()
+
+    # -------------------------------------------------------------------------
+    # READ METHODS
+    # -------------------------------------------------------------------------
+
+    def get_latest_analytics_snapshot(
+        self, channel_id: UUID
+    ) -> Optional[AnalyticsSnapshot]:
         """
-        Ensure database connection is established.
+        Retrieve the most recent analytics snapshot for a channel.
+
+        Args:
+            channel_id: The UUID of the channel.
 
         Returns:
-            True if connected, False if using fallback
+            The most recent AnalyticsSnapshot, or None if not found.
         """
-        if self._connected:
-            return True
-
+        session = self._get_session()
         try:
-            from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-            from sqlalchemy.orm import sessionmaker
-
-            self._engine = create_async_engine(
-                config.postgres.url,
-                echo=config.server.debug,
-                pool_pre_ping=True
+            snapshot = (
+                session.query(AnalyticsSnapshot)
+                .filter(AnalyticsSnapshot.channel_id == channel_id)
+                .order_by(desc(AnalyticsSnapshot.created_at))
+                .first()
             )
-
-            self._session_factory = sessionmaker(
-                self._engine,
-                class_=AsyncSession,
-                expire_on_commit=False
-            )
-
-            # Test connection
-            async with self._engine.begin() as conn:
-                await conn.execute("SELECT 1")
-
-            self._connected = True
-            logger.info("PostgreSQL connection established")
-            return True
-
-        except ImportError:
-            logger.warning(
-                "sqlalchemy/asyncpg not installed - using in-memory fallback")
-            return False
+            return snapshot
         except Exception as e:
-            logger.error(f"PostgreSQL connection failed: {e}")
-            return False
+            logger.error(f"Error fetching latest analytics snapshot: {e}")
+            raise
+        finally:
+            session.close()
 
-    async def get_channel_context(
-        self,
-        channel_id: str
-    ) -> dict[str, Any]:
+    def get_recent_weekly_insights(
+        self, channel_id: UUID, limit: int = 3
+    ) -> list[WeeklyInsight]:
         """
-        Get long-term context for a channel.
+        Retrieve recent weekly insights for a channel.
 
         Args:
-            channel_id: Channel identifier
+            channel_id: The UUID of the channel.
+            limit: Maximum number of insights to return (default: 3).
 
         Returns:
-            Dictionary with snapshots, insights, and analytics
+            List of WeeklyInsight objects ordered by week_start descending.
         """
-        connected = await self._ensure_connection()
+        session = self._get_session()
+        try:
+            insights = (
+                session.query(WeeklyInsight)
+                .filter(WeeklyInsight.channel_id == channel_id)
+                .order_by(desc(WeeklyInsight.week_start))
+                .limit(limit)
+                .all()
+            )
+            return insights
+        except Exception as e:
+            logger.error(f"Error fetching recent weekly insights: {e}")
+            raise
+        finally:
+            session.close()
 
-        if not connected:
-            # Return from fallback store
-            return self._fallback_store.get(f"channel:{channel_id}", {
-                "snapshots": [],
-                "insights": [],
-                "analytics": {}
-            })
-
-        # TODO: Implement actual database queries
-        # For now, return stub data
-        return {
-            "snapshots": await self._get_snapshots(channel_id),
-            "insights": await self._get_insights(channel_id),
-            "analytics": await self._get_analytics(channel_id)
-        }
-
-    async def _get_snapshots(
+    def get_recent_chat_sessions(
         self,
-        channel_id: str,
-        limit: int = 10
-    ) -> list[dict[str, Any]]:
+        user_id: UUID,
+        channel_id: Optional[UUID] = None,
+        limit: int = 5,
+    ) -> list[ChatSession]:
         """
-        Get recent snapshots for a channel.
+        Retrieve recent chat sessions for context.
 
         Args:
-            channel_id: Channel identifier
-            limit: Maximum number of snapshots
+            user_id: The UUID of the user.
+            channel_id: Optional channel UUID to filter by.
+            limit: Maximum number of sessions to return (default: 5).
 
         Returns:
-            List of snapshot dictionaries
+            List of ChatSession objects ordered by created_at descending.
         """
-        # Stub implementation
-        # TODO: Implement actual database query
-        return [
-            {
-                "id": str(uuid4()),
-                "channel_id": channel_id,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "metrics": {
-                    "subscribers": 1250,
-                    "views": 15420,
-                    "engagement_rate": 8.5
-                }
-            }
-        ]
+        session = self._get_session()
+        try:
+            query = session.query(ChatSession).filter(
+                ChatSession.user_id == user_id
+            )
 
-    async def _get_insights(
-        self,
-        channel_id: str,
-        limit: int = 5
-    ) -> list[str]:
+            if channel_id is not None:
+                query = query.filter(ChatSession.channel_id == channel_id)
+
+            chat_sessions = (
+                query.order_by(desc(ChatSession.created_at))
+                .limit(limit)
+                .all()
+            )
+            return chat_sessions
+        except Exception as e:
+            logger.error(f"Error fetching recent chat sessions: {e}")
+            raise
+        finally:
+            session.close()
+
+    # -------------------------------------------------------------------------
+    # WRITE METHODS
+    # -------------------------------------------------------------------------
+
+    def save_analytics_snapshot(self, snapshot: AnalyticsSnapshot) -> None:
         """
-        Get recent insights for a channel.
+        Persist an analytics snapshot to the database.
 
         Args:
-            channel_id: Channel identifier
-            limit: Maximum number of insights
+            snapshot: The AnalyticsSnapshot object to save.
 
-        Returns:
-            List of insight strings
+        Raises:
+            Exception: If the database operation fails.
         """
-        # Stub implementation
-        # TODO: Implement actual database query
-        return [
-            "Your channel has grown 15% this month",
-            "Peak engagement occurs on weekends",
-            "Video shorts are driving subscriber growth"
-        ]
+        session = self._get_session()
+        try:
+            session.add(snapshot)
+            session.commit()
+            logger.debug(
+                f"Saved analytics snapshot for channel {snapshot.channel_id}")
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error saving analytics snapshot: {e}")
+            raise
+        finally:
+            session.close()
 
-    async def _get_analytics(
-        self,
-        channel_id: str
-    ) -> dict[str, Any]:
+    def save_weekly_insight(self, insight: WeeklyInsight) -> None:
         """
-        Get aggregated analytics for a channel.
+        Persist a weekly insight to the database.
 
         Args:
-            channel_id: Channel identifier
+            insight: The WeeklyInsight object to save.
 
-        Returns:
-            Analytics dictionary
+        Raises:
+            Exception: If the database operation fails.
         """
-        # Stub implementation
-        # TODO: Implement actual database query
-        return {
-            "total_views": 150000,
-            "total_subscribers": 1250,
-            "avg_engagement": 7.8,
-            "growth_trend": "positive",
-            "top_content_types": ["tutorials", "reviews"]
-        }
+        session = self._get_session()
+        try:
+            session.add(insight)
+            session.commit()
+            logger.debug(
+                f"Saved weekly insight for channel {insight.channel_id}")
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error saving weekly insight: {e}")
+            raise
+        finally:
+            session.close()
 
-    async def store_snapshot(
-        self,
-        channel_id: str,
-        metrics: dict[str, Any]
-    ) -> str:
+    def save_chat_session(self, chat: ChatSession) -> None:
         """
-        Store a new channel snapshot.
+        Persist a chat session to the database.
 
         Args:
-            channel_id: Channel identifier
-            metrics: Metrics to store
+            chat: The ChatSession object to save.
 
-        Returns:
-            Snapshot ID
+        Raises:
+            Exception: If the database operation fails.
         """
-        snapshot_id = str(uuid4())
+        session = self._get_session()
+        try:
+            session.add(chat)
+            session.commit()
+            logger.debug(f"Saved chat session for user {chat.user_id}")
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error saving chat session: {e}")
+            raise
+        finally:
+            session.close()
 
-        connected = await self._ensure_connection()
 
-        if not connected:
-            # Store in fallback
-            key = f"channel:{channel_id}"
-            if key not in self._fallback_store:
-                self._fallback_store[key] = {
-                    "snapshots": [], "insights": [], "analytics": {}}
-
-            self._fallback_store[key]["snapshots"].append({
-                "id": snapshot_id,
-                "channel_id": channel_id,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "metrics": metrics
-            })
-            return snapshot_id
-
-        # TODO: Implement actual database insert
-        logger.info(f"Stored snapshot {snapshot_id} for channel {channel_id}")
-        return snapshot_id
-
-    async def store_insight(
-        self,
-        channel_id: str,
-        insight: str,
-        insight_type: str = "general",
-        confidence: float = 0.0
-    ) -> str:
-        """
-        Store a generated insight.
-
-        Args:
-            channel_id: Channel identifier
-            insight: Insight text
-            insight_type: Type of insight
-            confidence: Confidence score
-
-        Returns:
-            Insight ID
-        """
-        insight_id = str(uuid4())
-
-        connected = await self._ensure_connection()
-
-        if not connected:
-            # Store in fallback
-            key = f"channel:{channel_id}"
-            if key not in self._fallback_store:
-                self._fallback_store[key] = {
-                    "snapshots": [], "insights": [], "analytics": {}}
-
-            self._fallback_store[key]["insights"].append({
-                "id": insight_id,
-                "text": insight,
-                "type": insight_type,
-                "confidence": confidence,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            })
-            return insight_id
-
-        # TODO: Implement actual database insert
-        logger.info(f"Stored insight {insight_id} for channel {channel_id}")
-        return insight_id
-
-    async def get_weekly_digest(
-        self,
-        channel_id: str,
-        week_offset: int = 0
-    ) -> dict[str, Any]:
-        """
-        Get a weekly digest for a channel.
-
-        Args:
-            channel_id: Channel identifier
-            week_offset: Weeks ago (0 = current week)
-
-        Returns:
-            Weekly digest dictionary
-        """
-        # Stub implementation
-        # TODO: Implement actual database query
-        return {
-            "channel_id": channel_id,
-            "week": f"2024-W{52 - week_offset}",
-            "summary": {
-                "views": 15420,
-                "subscribers_gained": 50,
-                "top_video": "How to optimize your content",
-                "engagement_trend": "up"
-            },
-            "highlights": [
-                "Best performing week this month",
-                "3 videos published",
-                "Community engagement up 20%"
-            ],
-            "recommendations": [
-                "Consider posting more on weekends",
-                "Your tutorial content performs best"
-            ]
-        }
-
-    async def search_history(
-        self,
-        channel_id: str,
-        query: str,
-        limit: int = 10
-    ) -> list[dict[str, Any]]:
-        """
-        Search through historical data.
-
-        Args:
-            channel_id: Channel identifier
-            query: Search query
-            limit: Maximum results
-
-        Returns:
-            List of matching records
-        """
-        # Stub implementation
-        # TODO: Implement actual full-text search
-        return [
-            {
-                "type": "insight",
-                "content": f"Previous insight matching '{query}'",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "relevance": 0.85
-            }
-        ]
-
-    async def get_user_preferences(
-        self,
-        user_id: str
-    ) -> dict[str, Any]:
-        """
-        Get user preferences.
-
-        Args:
-            user_id: User identifier
-
-        Returns:
-            User preferences dictionary
-        """
-        # Stub implementation
-        # TODO: Implement actual database query
-        return {
-            "timezone": "UTC",
-            "language": "en",
-            "notification_preferences": {
-                "weekly_digest": True,
-                "alerts": True
-            },
-            "display_preferences": {
-                "theme": "light",
-                "date_format": "YYYY-MM-DD"
-            }
-        }
-
-    async def update_user_preferences(
-        self,
-        user_id: str,
-        preferences: dict[str, Any]
-    ) -> None:
-        """
-        Update user preferences.
-
-        Args:
-            user_id: User identifier
-            preferences: Preferences to update
-        """
-        # Stub implementation
-        # TODO: Implement actual database update
-        logger.info(f"Updated preferences for user {user_id}")
-
-    async def close(self) -> None:
-        """Close database connections."""
-        if self._engine:
-            await self._engine.dispose()
-            self._connected = False
-            logger.info("PostgreSQL connection closed")
+# Global instance for convenience
+postgres_store = PostgresMemoryStore()

@@ -1,0 +1,28 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: context_hub_postgres
+    platform: linux/arm64
+    environment:
+      POSTGRES_DB: context_hub
+      POSTGRES_USER: context_admin
+      POSTGRES_PASSWORD: context_secret
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+
+  redis:
+    image: redis:7-alpine
+    container_name: context_hub_redis
+    platform: linux/arm64
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+
+volumes:
+  postgres_data:
+  redis_data:

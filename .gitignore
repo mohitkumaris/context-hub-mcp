@@ -98,3 +98,7 @@ secrets.json
 credentials.json
 *.pem
 *.key
+
+# Test scripts and scratch files
+scripts/
+tests/test_postgres_store.py
