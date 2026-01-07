@@ -9,6 +9,11 @@ import os
 from typing import Optional
 from dataclasses import dataclass, field
 
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 
 @dataclass
 class RedisConfig:
@@ -36,6 +41,9 @@ class RedisConfig:
 class PostgresConfig:
     """PostgreSQL connection configuration for long-term memory."""
 
+    # Support direct DATABASE_URL or individual components
+    database_url: Optional[str] = field(
+        default_factory=lambda: os.getenv("DATABASE_URL"))
     host: str = field(default_factory=lambda: os.getenv(
         "POSTGRES_HOST", "localhost"))
     port: int = field(default_factory=lambda: int(
@@ -51,7 +59,22 @@ class PostgresConfig:
 
     @property
     def url(self) -> str:
-        """Build PostgreSQL connection URL."""
+        """
+        Build PostgreSQL connection URL.
+
+        Prioritizes DATABASE_URL if set, otherwise builds from components.
+        Converts to asyncpg driver format for async support.
+        """
+        if self.database_url:
+            url = self.database_url
+            # Convert postgres:// to postgresql+asyncpg:// for async support
+            if url.startswith("postgres://"):
+                return url.replace("postgres://", "postgresql+asyncpg://", 1)
+            elif url.startswith("postgresql://"):
+                return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            return url
+
+        # Build from individual components
         auth = f"{self.user}:{self.password}@" if self.password else f"{self.user}@"
         return f"postgresql+asyncpg://{auth}{self.host}:{self.port}/{self.database}?ssl={self.ssl_mode}"
 

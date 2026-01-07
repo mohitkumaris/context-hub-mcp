@@ -15,30 +15,39 @@ The **Model Context Protocol** is an architectural pattern for building AI-power
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        FastAPI Server                           │
-│                         POST /execute                           │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     Executor (Orchestrator)                      │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │   Planner   │  │   Execute   │  │       Formatter         │  │
-│  │  (Intent)   │──│   (Tools)   │──│   (Response)            │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-        │                   │                      │
-        ▼                   ▼                      ▼
-┌───────────────┐  ┌───────────────┐  ┌─────────────────────────┐
-│   Registry    │  │    Memory     │  │        Prompts          │
-│  ┌─────────┐  │  │  ┌─────────┐  │  │  ┌─────────────────┐    │
-│  │  Tools  │  │  │  │  Redis  │  │  │  │  system.txt     │    │
-│  │ Schemas │  │  │  │ (short) │  │  │  │  analysis.txt   │    │
-│  │Policies │  │  │  │Postgres │  │  │  └─────────────────┘    │
-│  └─────────┘  │  │  │ (long)  │  │  └─────────────────────────┘
-└───────────────┘  │  └─────────┘  │
-                   └───────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                           FastAPI Server                                 │
+│                     POST /execute  |  GET /health                        │
+└──────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│                        Executor (Orchestrator)                           │
+│  ┌──────────────┐   ┌──────────────┐   ┌──────────────────────────────┐  │
+│  │   Planner    │   │   Execute    │   │         Formatter            │  │
+│  │  (Intent &   │──▶│   (Tools)    │──▶│   (Response & Content)       │  │
+│  │   Planning)  │   │              │   │                              │  │
+│  └──────────────┘   └──────────────┘   └──────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────────┘
+         │                    │                         │
+         ▼                    ▼                         ▼
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────────┐
+│    Registry     │  │     Memory      │  │          Prompts            │
+│  ┌───────────┐  │  │  ┌───────────┐  │  │  ┌───────────────────────┐  │
+│  │   Tools   │  │  │  │   Redis   │  │  │  │    system.txt         │  │
+│  │  (17 tools│  │  │  │  (short)  │  │  │  │    analysis.txt       │  │
+│  │  Registry)│  │  │  └───────────┘  │  │  └───────────────────────┘  │
+│  ├───────────┤  │  │  ┌───────────┐  │  └─────────────────────────────┘
+│  │ Handlers  │  │  │  │ Postgres  │  │
+│  │ (modular) │  │  │  │  (long)   │  │
+│  ├───────────┤  │  │  └───────────┘  │
+│  │  Schemas  │  │  └─────────────────┘
+│  ├───────────┤  │
+│  │ Policies  │  │
+│  │(FREE/PRO/ │  │
+│  │  AGENCY)  │  │
+│  └───────────┘  │
+└─────────────────┘
 ```
 
 ## Features
@@ -65,18 +74,52 @@ context-hub-mcp/
 │   ├── planner.py         # Intent classification & tool planning
 │   └── formatter.py       # Response formatting
 │
-├── registry/              # Tool and schema definitions
-│   ├── tools.py           # Tool registry with implementations
+├── registry/              # Tool registry and definitions (modular)
+│   ├── base.py            # Core classes (ToolResult, ToolDefinition)
+│   ├── tools.py           # Tool registry with 17 tools
 │   ├── schemas.py         # Pydantic request/response models
-│   └── policies.py        # Plan-based access control
+│   ├── policies.py        # Plan-based access control (FREE/PRO/AGENCY)
+│   └── handlers/          # Handler implementations by category
+│       ├── analytics.py   # fetch_analytics, compute_metrics, generate_chart
+│       ├── insight.py     # analyze_data, generate_insight, get_recommendations
+│       ├── report.py      # generate_report, summarize_data
+│       ├── memory.py      # recall_context, search_history
+│       ├── action.py      # execute_action, schedule_task
+│       ├── search.py      # search_data
+│       └── youtube.py     # get_channel_snapshot, get_top_videos,
+│                          # video_post_mortem, weekly_growth_report
+│
+├── db/                    # Database models and session management
+│   ├── __init__.py        # Package exports
+│   ├── base.py            # SQLAlchemy Base, TimestampMixin
+│   ├── session.py         # Async engine, session factory, get_db()
+│   └── models/            # SQLAlchemy ORM models
+│       ├── user.py        # User with subscription plans (FREE/PRO/AGENCY)
+│       ├── channel.py     # YouTube channel linked to user
+│       ├── analytics_snapshot.py  # Channel analytics (7/30/90 days)
+│       ├── video_snapshot.py      # Individual video metrics
+│       ├── weekly_insight.py      # Weekly growth reports
+│       └── chat_session.py        # Conversation history/context
 │
 ├── memory/                # Data persistence
 │   ├── redis_store.py     # Short-term memory (conversations)
 │   └── postgres_store.py  # Long-term memory (analytics)
 │
+├── tests/                 # Unit tests
+│   └── test_server.py     # Server endpoint tests (37 tests)
+│
 └── prompts/               # LLM prompt templates
     ├── system.txt         # Core system prompt
     └── analysis.txt       # Deep analysis mode prompt
+```
+
+### Database Model Relationships
+
+```
+User ──┬── Channel ──┬── AnalyticsSnapshot
+       │             ├── VideoSnapshot
+       │             └── WeeklyInsight
+       └── ChatSession
 ```
 
 ## Quick Start
@@ -201,11 +244,80 @@ docker-compose up -d
 
 ## API Reference
 
+### Base URL
+
+```
+http://localhost:8000
+```
+
+### Endpoints Overview
+
+| Method | Endpoint   | Description                              |
+| ------ | ---------- | ---------------------------------------- |
+| GET    | `/`        | Root endpoint with API info              |
+| GET    | `/health`  | Health check for container orchestration |
+| POST   | `/execute` | Main execution endpoint                  |
+| GET    | `/docs`    | Swagger UI (debug mode only)             |
+| GET    | `/redoc`   | ReDoc documentation (debug mode only)    |
+
+---
+
+### GET /
+
+Root endpoint with API information.
+
+**Request:**
+
+```
+GET http://localhost:8000/
+```
+
+**Response:**
+
+```json
+{
+  "service": "Context Hub MCP Server",
+  "version": "1.0.0",
+  "docs": "/docs"
+}
+```
+
+---
+
+### GET /health
+
+Health check endpoint for container orchestration.
+
+**Request:**
+
+```
+GET http://localhost:8000/health
+```
+
+**Response:**
+
+```json
+{
+  "status": "healthy",
+  "version": "1.0.0",
+  "llm_provider": "openai"
+}
+```
+
+---
+
 ### POST /execute
 
 Execute a context request with tool orchestration.
 
 **Request:**
+
+```
+POST http://localhost:8000/execute
+Content-Type: application/json
+```
+
+**Request Body:**
 
 ```json
 {
@@ -244,18 +356,530 @@ Execute a context request with tool orchestration.
 }
 ```
 
-### GET /health
+---
 
-Health check endpoint for container orchestration.
+## Postman Collection
 
-**Response:**
+### Import Instructions
+
+1. Open Postman
+2. Click **Import** → **Raw text**
+3. Paste the JSON below and import
+
+### Postman Collection JSON
 
 ```json
 {
-  "status": "healthy",
-  "version": "1.0.0",
-  "llm_provider": "openai"
+  "info": {
+    "name": "Context Hub MCP Server",
+    "description": "API collection for Context Hub MCP Server - AI agent context orchestration",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "System",
+      "item": [
+        {
+          "name": "Root - API Info",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/",
+              "host": ["{{base_url}}"],
+              "path": [""]
+            },
+            "description": "Get API information and version"
+          }
+        },
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Check server health status"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Execute - Analytics",
+      "item": [
+        {
+          "name": "Get Channel Analytics",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Show me my channel analytics for last week\",\n  \"metadata\": {\n    \"user_plan\": \"free\",\n    \"timezone\": \"UTC\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Fetch analytics data for a channel"
+          }
+        },
+        {
+          "name": "Get View Statistics",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"How many views did I get this month?\",\n  \"metadata\": {\n    \"user_plan\": \"pro\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Get view statistics and metrics"
+          }
+        },
+        {
+          "name": "Compare Performance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Compare my performance this week versus last week\",\n  \"metadata\": {\n    \"user_plan\": \"pro\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Compare performance across time periods"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Execute - Insights",
+      "item": [
+        {
+          "name": "Get Growth Insights",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Give me insights on my channel growth\",\n  \"metadata\": {\n    \"user_plan\": \"pro\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Generate growth insights and recommendations"
+          }
+        },
+        {
+          "name": "Get Recommendations",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"What should I do to improve my engagement?\",\n  \"metadata\": {\n    \"user_plan\": \"agency\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Get personalized recommendations (Agency tier)"
+          }
+        },
+        {
+          "name": "Why Analysis",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Why did my views drop last week?\",\n  \"metadata\": {\n    \"user_plan\": \"pro\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Analyze reasons behind performance changes"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Execute - Reports",
+      "item": [
+        {
+          "name": "Weekly Performance Report",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Generate a weekly performance report\",\n  \"metadata\": {\n    \"user_plan\": \"pro\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Generate comprehensive weekly report"
+          }
+        },
+        {
+          "name": "Monthly Summary",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Give me a summary of last month\",\n  \"metadata\": {\n    \"user_plan\": \"pro\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Get monthly performance summary"
+          }
+        },
+        {
+          "name": "Catch Me Up",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Catch me up on what happened this week\",\n  \"metadata\": {\n    \"user_plan\": \"free\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Quick recap of recent activity"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Execute - Memory",
+      "item": [
+        {
+          "name": "Recall Previous Discussion",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"What did we discuss earlier about my thumbnails?\",\n  \"metadata\": {\n    \"user_plan\": \"free\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Recall context from previous conversations"
+          }
+        },
+        {
+          "name": "Search History",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Find all the times we talked about engagement\",\n  \"metadata\": {\n    \"user_plan\": \"pro\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Search through conversation history"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Execute - Actions",
+      "item": [
+        {
+          "name": "Schedule Task",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Schedule a weekly analytics report every Monday\",\n  \"metadata\": {\n    \"user_plan\": \"agency\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Schedule automated tasks (Agency tier)"
+          }
+        },
+        {
+          "name": "Execute Action",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Create a content calendar for next week\",\n  \"metadata\": {\n    \"user_plan\": \"agency\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Execute specific actions (Agency tier)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Execute - Search",
+      "item": [
+        {
+          "name": "Search Data",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Find my best performing videos\",\n  \"metadata\": {\n    \"user_plan\": \"free\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Search across all data sources"
+          }
+        },
+        {
+          "name": "List Content",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user_123\",\n  \"channel_id\": \"channel_456\",\n  \"message\": \"Show me all my videos from last month\",\n  \"metadata\": {\n    \"user_plan\": \"free\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "List and display content"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Plan Tier Tests",
+      "item": [
+        {
+          "name": "Free Tier Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"free_user\",\n  \"channel_id\": \"channel_free\",\n  \"message\": \"Show me my analytics\",\n  \"metadata\": {\n    \"user_plan\": \"free\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Test with Free tier access"
+          }
+        },
+        {
+          "name": "Pro Tier Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"pro_user\",\n  \"channel_id\": \"channel_pro\",\n  \"message\": \"Generate a detailed report with charts\",\n  \"metadata\": {\n    \"user_plan\": \"pro\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Test with Pro tier access"
+          }
+        },
+        {
+          "name": "Agency Tier Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"agency_user\",\n  \"channel_id\": \"channel_agency\",\n  \"message\": \"Schedule a task and give me recommendations\",\n  \"metadata\": {\n    \"user_plan\": \"agency\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/execute",
+              "host": ["{{base_url}}"],
+              "path": ["execute"]
+            },
+            "description": "Test with Agency tier access (all tools)"
+          }
+        }
+      ]
+    }
+  ]
 }
+```
+
+### Quick Test URLs
+
+After starting the server with `DEBUG=true python server.py`, test these URLs:
+
+| Endpoint     | URL                                    |
+| ------------ | -------------------------------------- |
+| Root         | `http://localhost:8000/`               |
+| Health       | `http://localhost:8000/health`         |
+| Swagger Docs | `http://localhost:8000/docs`           |
+| ReDoc        | `http://localhost:8000/redoc`          |
+| Execute      | `http://localhost:8000/execute` (POST) |
+
+### Sample cURL Commands
+
+**Health Check:**
+
+```bash
+curl http://localhost:8000/health
+```
+
+**Execute Request:**
+
+```bash
+curl -X POST http://localhost:8000/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user_123",
+    "channel_id": "channel_456",
+    "message": "Show me my analytics",
+    "metadata": {"user_plan": "pro"}
+  }'
 ```
 
 ## Configuration
@@ -286,27 +910,71 @@ All configuration is via environment variables:
 
 ## Available Tools
 
-### Free Tier
+The MCP server provides 17 specialized tools organized by subscription tier. Each tool has a specific purpose and returns structured data.
 
-- `fetch_analytics` - Fetch channel analytics data
-- `summarize_data` - Create data summaries
-- `recall_context` - Recall conversation context
-- `search_data` - Search across data sources
+### Free Tier (6 tools)
 
-### Pro Tier
+| Tool                   | Category  | Description                                                                                                                                                       |
+| ---------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fetch_analytics`      | Analytics | Fetch analytics data for a channel or time period. Returns views, subscribers, engagement metrics, and watch time statistics.                                     |
+| `summarize_data`       | Report    | Create a concise summary of data with key highlights. Useful for quick overviews and executive summaries.                                                         |
+| `recall_context`       | Memory    | Recall relevant context from conversation history. Retrieves previous discussions and maintains conversation continuity.                                          |
+| `search_data`          | Search    | Search across all available data sources including analytics, history, and insights. Returns matched results with source attribution.                             |
+| `get_channel_snapshot` | Analytics | Get a summarized snapshot of YouTube channel performance for a given period (7/30/90 days). Returns subscribers, views, video count, CTR, and average watch time. |
+| `get_top_videos`       | Analytics | Return top-performing videos for a YouTube channel sorted by views, engagement, or CTR. Enables cross-video performance comparison.                               |
 
-- `compute_metrics` - Compute derived metrics
-- `generate_chart` - Generate visualization data
-- `analyze_data` - Deep data analysis
-- `generate_insight` - Generate actionable insights
-- `generate_report` - Create comprehensive reports
-- `search_history` - Search historical data
+### Pro Tier (8 tools)
 
-### Agency Tier
+| Tool                   | Category  | Description                                                                                                                                                             |
+| ---------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `compute_metrics`      | Analytics | Compute derived metrics from raw analytics data including growth rate, engagement rate, and trend analysis.                                                             |
+| `generate_chart`       | Analytics | Generate chart data for visualization (line, bar, pie charts). Returns labels and datasets ready for frontend rendering.                                                |
+| `analyze_data`         | Insight   | Perform deep analysis on channel data with focus areas. Returns analysis summary, key findings, and confidence scores.                                                  |
+| `generate_insight`     | Insight   | Generate actionable insights from analyzed data. Returns prioritized insights with specific action items.                                                               |
+| `generate_report`      | Report    | Generate comprehensive reports with multiple sections. Includes title, summary, detailed sections, and timestamp.                                                       |
+| `search_history`       | Memory    | Search through historical data and conversations. Returns results with relevance scores for better context matching.                                                    |
+| `video_post_mortem`    | Insight   | Analyze why a video underperformed or overperformed compared to channel average or last 5 videos. Returns verdict, data-driven reasons, and actionable recommendations. |
+| `weekly_growth_report` | Report    | Generate weekly growth analysis with week-over-week comparisons. Returns summary, concrete wins/losses with metrics, and strategic next actions.                        |
 
-- `get_recommendations` - Personalized recommendations
-- `execute_action` - Execute actions
-- `schedule_task` - Schedule future tasks
+### Agency Tier (3 tools)
+
+| Tool                  | Category | Description                                                                                                                               |
+| --------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_recommendations` | Insight  | Get personalized recommendations based on channel data and goals. Returns prioritized recommendations with rationale and expected impact. |
+| `execute_action`      | Action   | Execute a specific action on behalf of the user (with confirmation). Supports various action types with custom parameters.                |
+| `schedule_task`       | Action   | Schedule a task for future execution. Returns task ID and next run time for tracking and management.                                      |
+
+### Tool Categories
+
+| Category      | Purpose                              | Example Use Cases                       |
+| ------------- | ------------------------------------ | --------------------------------------- |
+| **Analytics** | Data fetching and metric computation | Views, subscribers, CTR, watch time     |
+| **Insight**   | Data analysis and recommendations    | Growth patterns, performance reasons    |
+| **Report**    | Report and summary generation        | Weekly reports, monthly summaries       |
+| **Memory**    | Context recall and history search    | Previous conversations, historical data |
+| **Action**    | Task execution and scheduling        | Automated actions, scheduled tasks      |
+| **Search**    | Data search across sources           | Finding specific information            |
+
+### Tool Access by Plan
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      AGENCY (17 tools)                      │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │                   PRO (14 tools)                     │   │
+│  │  ┌─────────────────────────────────────────────┐    │   │
+│  │  │              FREE (6 tools)                  │    │   │
+│  │  │  fetch_analytics, summarize_data,           │    │   │
+│  │  │  recall_context, search_data,               │    │   │
+│  │  │  get_channel_snapshot, get_top_videos       │    │   │
+│  │  └─────────────────────────────────────────────┘    │   │
+│  │  + compute_metrics, generate_chart, analyze_data,   │   │
+│  │    generate_insight, generate_report, search_history│   │
+│  │    video_post_mortem, weekly_growth_report          │   │
+│  └─────────────────────────────────────────────────────┘   │
+│  + get_recommendations, execute_action, schedule_task      │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ## Development
 
@@ -318,18 +986,60 @@ All configuration is via environment variables:
 
 ### Extending Tools
 
-Add new tools in `registry/tools.py`:
+Tools are organized in a modular structure under `registry/`:
+
+```
+registry/
+├── base.py           # Core classes (ToolResult, ToolDefinition)
+├── tools.py          # Tool registry with definitions
+├── handlers/         # Handler implementations by category
+│   ├── analytics.py  # fetch_analytics, compute_metrics, generate_chart
+│   ├── insight.py    # analyze_data, generate_insight, get_recommendations
+│   ├── report.py     # generate_report, summarize_data
+│   ├── memory.py     # recall_context, search_history
+│   ├── action.py     # execute_action, schedule_task
+│   ├── search.py     # search_data
+│   └── youtube.py    # get_channel_snapshot, get_top_videos,
+│                     # video_post_mortem, weekly_growth_report
+├── schemas.py        # Pydantic request/response models
+└── policies.py       # Plan-based access control
+```
+
+**Step 1:** Add handler in the appropriate `handlers/*.py` file:
 
 ```python
+# registry/handlers/analytics.py
+class AnalyticsHandlers:
+    @staticmethod
+    async def my_new_handler(input_data: dict[str, Any]) -> dict[str, Any]:
+        """Handler implementation."""
+        return {"result": "data"}
+```
+
+**Step 2:** Register the tool in `registry/tools.py`:
+
+```python
+from .handlers import AnalyticsHandlers
+
+# In the appropriate _register_*_tools() method:
 self._register_tool(ToolDefinition(
     name="my_new_tool",
     description="Description of what it does",
     input_schema={...},
     output_schema={...},
-    handler=self._my_handler,
-    category="custom",
+    handler=AnalyticsHandlers.my_new_handler,
+    category="analytics",
     requires_plan="pro"
 ))
+```
+
+**Step 3:** Update `registry/policies.py` with the new tool:
+
+```python
+TOOL_REQUIREMENTS: dict[str, str] = {
+    # ...existing tools...
+    "my_new_tool": "pro",  # Add minimum required plan
+}
 ```
 
 ### Adding LLM Providers

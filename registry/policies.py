@@ -2,14 +2,28 @@
 Policy engine for plan-based access control.
 
 Enforces subscription-based restrictions on tool access.
-Plans: free, pro, agency
+Plans: FREE, PRO, AGENCY
+
+This module provides a simple, extensible policy engine that:
+- Defines plan hierarchy (FREE < PRO < AGENCY)
+- Maps tools to minimum required plan
+- Exposes can_execute(tool_name, user_plan) -> bool
+- Provides rate limiting and feature flags per plan
 """
 
 import logging
 from dataclasses import dataclass
+from enum import Enum
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+class Plan(str, Enum):
+    """Subscription plan tiers."""
+    FREE = "free"
+    PRO = "pro"
+    AGENCY = "agency"
 
 
 @dataclass
@@ -31,62 +45,94 @@ class PolicyEngine:
     Determines whether a user can execute a specific tool based on
     their subscription plan. Also provides rate limiting info and
     feature flags.
+
+    Usage:
+        engine = PolicyEngine()
+        
+        # Check if user can execute a tool
+        if engine.can_execute("video_post_mortem", "free"):
+            # Execute tool
+        else:
+            # Suggest upgrade
+            upgrade_to = engine.get_upgrade_suggestion("video_post_mortem", "free")
     """
 
-    # Plan hierarchy for comparison
-    PLAN_HIERARCHY = ["free", "pro", "agency"]
+    # Plan hierarchy for comparison (index = level)
+    PLAN_HIERARCHY: list[str] = [Plan.FREE.value, Plan.PRO.value, Plan.AGENCY.value]
 
     # Tool requirements - minimum plan needed for each tool
+    # This is the single source of truth for tool access control
     TOOL_REQUIREMENTS: dict[str, str] = {
-        # Free tier tools
-        "fetch_analytics": "free",
-        "summarize_data": "free",
-        "recall_context": "free",
-        "search_data": "free",
+        # =====================================================================
+        # FREE tier tools - Basic analytics and memory
+        # =====================================================================
+        "fetch_analytics": Plan.FREE.value,
+        "summarize_data": Plan.FREE.value,
+        "recall_context": Plan.FREE.value,
+        "search_data": Plan.FREE.value,
+        "get_channel_snapshot": Plan.FREE.value,  # Basic channel overview
+        "get_top_videos": Plan.FREE.value,        # Top videos list
 
-        # Pro tier tools
-        "compute_metrics": "pro",
-        "generate_chart": "pro",
-        "analyze_data": "pro",
-        "generate_insight": "pro",
-        "generate_report": "pro",
-        "search_history": "pro",
+        # =====================================================================
+        # PRO tier tools - Advanced analytics, insights, and reports
+        # =====================================================================
+        "compute_metrics": Plan.PRO.value,
+        "generate_chart": Plan.PRO.value,
+        "analyze_data": Plan.PRO.value,
+        "generate_insight": Plan.PRO.value,
+        "generate_report": Plan.PRO.value,
+        "search_history": Plan.PRO.value,
+        "video_post_mortem": Plan.PRO.value,      # Video performance analysis
+        "weekly_growth_report": Plan.PRO.value,   # Weekly growth reports
 
-        # Agency tier tools
-        "get_recommendations": "agency",
-        "execute_action": "agency",
-        "schedule_task": "agency"
+        # =====================================================================
+        # AGENCY tier tools - Actions, automation, and premium features
+        # =====================================================================
+        "get_recommendations": Plan.AGENCY.value,
+        "execute_action": Plan.AGENCY.value,
+        "schedule_task": Plan.AGENCY.value,
     }
 
-    # Plan definitions
+    # Plan definitions with full feature sets
     PLANS: dict[str, PlanLimits] = {
-        "free": PlanLimits(
-            name="free",
-            tool_access={"fetch_analytics", "summarize_data",
-                         "recall_context", "search_data"},
+        Plan.FREE.value: PlanLimits(
+            name=Plan.FREE.value,
+            tool_access={
+                "fetch_analytics", "summarize_data", "recall_context", 
+                "search_data", "get_channel_snapshot", "get_top_videos"
+            },
             daily_requests=50,
             max_context_length=4000,
             deep_analysis_enabled=False,
             priority_support=False
         ),
-        "pro": PlanLimits(
-            name="pro",
+        Plan.PRO.value: PlanLimits(
+            name=Plan.PRO.value,
             tool_access={
-                "fetch_analytics", "summarize_data", "recall_context", "search_data",
-                "compute_metrics", "generate_chart", "analyze_data", "generate_insight",
-                "generate_report", "search_history"
+                # All FREE tools
+                "fetch_analytics", "summarize_data", "recall_context", 
+                "search_data", "get_channel_snapshot", "get_top_videos",
+                # PRO tools
+                "compute_metrics", "generate_chart", "analyze_data", 
+                "generate_insight", "generate_report", "search_history",
+                "video_post_mortem", "weekly_growth_report"
             },
             daily_requests=500,
             max_context_length=16000,
             deep_analysis_enabled=True,
             priority_support=False
         ),
-        "agency": PlanLimits(
-            name="agency",
+        Plan.AGENCY.value: PlanLimits(
+            name=Plan.AGENCY.value,
             tool_access={
-                "fetch_analytics", "summarize_data", "recall_context", "search_data",
-                "compute_metrics", "generate_chart", "analyze_data", "generate_insight",
-                "generate_report", "search_history",
+                # All FREE tools
+                "fetch_analytics", "summarize_data", "recall_context", 
+                "search_data", "get_channel_snapshot", "get_top_videos",
+                # All PRO tools
+                "compute_metrics", "generate_chart", "analyze_data", 
+                "generate_insight", "generate_report", "search_history",
+                "video_post_mortem", "weekly_growth_report",
+                # AGENCY tools
                 "get_recommendations", "execute_action", "schedule_task"
             },
             daily_requests=5000,
@@ -98,24 +144,51 @@ class PolicyEngine:
 
     def __init__(self) -> None:
         """Initialize the policy engine."""
-        pass
+        self._validate_configuration()
+
+    def _validate_configuration(self) -> None:
+        """Validate that TOOL_REQUIREMENTS and PLANS are consistent."""
+        for tool_name, required_plan in self.TOOL_REQUIREMENTS.items():
+            # Ensure tool is in the correct plan's tool_access
+            for plan_name, limits in self.PLANS.items():
+                plan_level = self.PLAN_HIERARCHY.index(plan_name)
+                required_level = self.PLAN_HIERARCHY.index(required_plan)
+                
+                if plan_level >= required_level:
+                    if tool_name not in limits.tool_access:
+                        logger.warning(
+                            f"Configuration mismatch: {tool_name} should be in {plan_name} "
+                            f"tool_access (requires {required_plan})"
+                        )
 
     def can_execute(self, tool_name: str, user_plan: str) -> bool:
         """
         Check if a tool can be executed under a user's plan.
 
+        This is the primary access control function. It compares the user's
+        plan level against the tool's minimum required plan.
+
         Args:
             tool_name: Name of the tool to check
-            user_plan: User's subscription plan
+            user_plan: User's subscription plan (free, pro, or agency)
 
         Returns:
-            True if execution is allowed
+            True if execution is allowed, False otherwise
+
+        Examples:
+            >>> engine = PolicyEngine()
+            >>> engine.can_execute("fetch_analytics", "free")
+            True
+            >>> engine.can_execute("video_post_mortem", "free")
+            False
+            >>> engine.can_execute("video_post_mortem", "pro")
+            True
         """
         # Get the required plan for this tool
         required_plan = self.TOOL_REQUIREMENTS.get(tool_name)
 
         if required_plan is None:
-            # Unknown tool - deny by default
+            # Unknown tool - deny by default for security
             logger.warning(f"Unknown tool in policy check: {tool_name}")
             return False
 
