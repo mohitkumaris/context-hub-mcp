@@ -26,6 +26,7 @@ from memory.postgres_store import PostgresMemoryStore
 from db.models.analytics_snapshot import AnalyticsSnapshot
 from db.models.weekly_insight import WeeklyInsight
 from db.models.chat_session import ChatSession
+from llm.langchain_gemini import LangChainGeminiClient
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,9 @@ class ContextOrchestrator:
         self.tool_registry = ToolRegistry()
         self.policy_engine = PolicyEngine()
         self.redis_store = RedisMemoryStore()
+        self.redis_store = RedisMemoryStore()
         self.postgres_store = PostgresMemoryStore()
+        self.gemini_client = LangChainGeminiClient()
 
     async def execute(
         self,
@@ -619,17 +622,11 @@ Provide a helpful, data-backed response.
         Returns:
             LLM response string
         """
-        # Stub implementation - returns a placeholder
-        # TODO: Implement actual LLM provider integration
+        # Call Gemini via the LangChain client
         logger.info(
-            f"LLM invocation (stub): provider={config.llm.provider}, model={config.llm.model}")
-
-        return (
-            "This is a stub LLM response. In production, this would contain "
-            "the actual response from the configured LLM provider "
-            f"({config.llm.provider}/{config.llm.model}). "
-            "The response would be based on the provided context and tools."
-        )
+            f"LLM invocation (LangChain Gemini): provider=google, model={config.llm.gemini_model}")
+        
+        return self.gemini_client.generate(prompt)
 
     def _load_prompt(self, prompt_type: str) -> str:
         """

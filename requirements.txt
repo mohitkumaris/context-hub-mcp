@@ -17,6 +17,11 @@ psycopg2-binary>=2.9.9          # PostgreSQL adapter (sync, for Alembic)
 
 # HTTP Client
 httpx>=0.26.0                   # Modern async HTTP client for LLM API calls
+google-generativeai>=0.3.0      # Google Gemini Python SDK
+langchain>=0.1.0                # LangChain framework
+langchain-core>=0.1.0           # Core LangChain abstractions
+langchain-community>=0.0.10     # Community integrations
+langchain-google-genai>=0.0.5   # Google Gemini for LangChain
 aiohttp>=3.9.0                  # Async HTTP client/server framework
 
 # Configuration

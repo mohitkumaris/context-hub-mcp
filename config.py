@@ -96,6 +96,11 @@ class LLMConfig:
         os.getenv("LLM_TEMPERATURE", "0.7")))
     timeout: int = field(default_factory=lambda: int(
         os.getenv("LLM_TIMEOUT", "60")))
+    gemini_api_key: Optional[str] = field(
+        default_factory=lambda: os.getenv("GEMINI_API_KEY"))
+    gemini_model: str = field(
+        default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-flash-latest"))
+
 
 
 @dataclass
@@ -140,8 +145,8 @@ class Config:
         """
         warnings = []
 
-        if not self.llm.api_key:
-            warnings.append("LLM_API_KEY not set - LLM calls will fail")
+        if not self.llm.api_key and not self.llm.gemini_api_key:
+            warnings.append("No LLM API key set - LLM calls will fail")
 
         if not self.redis.password and not self.server.debug:
             warnings.append("REDIS_PASSWORD not set in production mode")
