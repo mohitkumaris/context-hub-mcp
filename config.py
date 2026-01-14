@@ -99,7 +99,7 @@ class LLMConfig:
     gemini_api_key: Optional[str] = field(
         default_factory=lambda: os.getenv("GEMINI_API_KEY"))
     gemini_model: str = field(
-        default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-flash-latest"))
+        default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite"))
 
 
 

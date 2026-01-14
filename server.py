@@ -87,7 +87,7 @@ async def health_check() -> HealthResponse:
     return HealthResponse(
         status="healthy",
         version="1.0.0",
-        llm_provider=config.llm.provider
+        llm_provider=config.llm.gemini_model
     )
 
 

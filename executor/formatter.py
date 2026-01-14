@@ -63,8 +63,12 @@ class ResponseFormatter:
         """
         Format the complete response for API output.
 
+        IMPORTANT: The llm_response is returned in full without any truncation,
+        slicing, or summarization. The 'content' field in ExecuteResponse
+        serves as the 'answer' field for the frontend.
+
         Args:
-            llm_response: Raw LLM response text
+            llm_response: Raw LLM response text (returned in full)
             tool_results: Results from tool execution
             plan: The execution plan that was followed
             metadata: Additional request metadata
@@ -85,7 +89,7 @@ class ResponseFormatter:
         # Check for any tool errors
         tool_errors = [r for r in tool_results if not r.success]
 
-        # Format the main content
+        # Format the main content - FULL response, no truncation
         formatted = self._format_content(
             llm_response=llm_response,
             tool_outputs=tool_outputs,
@@ -102,9 +106,13 @@ class ResponseFormatter:
         # Determine success status
         success = len(tool_errors) == 0 or len(tools_used) > 0
 
+        # The 'content' field serves as the canonical 'answer' for the frontend
+        # IMPORTANT: Return the FULL llm_response - no truncation or slicing
+        answer = formatted.content  # Full response text
+
         return ExecuteResponse(
             success=success,
-            content=formatted.content,
+            content=answer,  # Maps to 'answer' for frontend
             content_type=formatted.content_type,
             tools_used=tools_used,
             tool_outputs=formatted.tool_outputs,

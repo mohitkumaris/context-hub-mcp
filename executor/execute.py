@@ -27,6 +27,7 @@ from db.models.analytics_snapshot import AnalyticsSnapshot
 from db.models.weekly_insight import WeeklyInsight
 from db.models.chat_session import ChatSession
 from llm.langchain_gemini import LangChainGeminiClient
+from analytics.context_builder import AnalyticsContextBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +51,9 @@ class ContextOrchestrator:
         self.tool_registry = ToolRegistry()
         self.policy_engine = PolicyEngine()
         self.redis_store = RedisMemoryStore()
-        self.redis_store = RedisMemoryStore()
         self.postgres_store = PostgresMemoryStore()
         self.gemini_client = LangChainGeminiClient()
+        self.analytics_builder = AnalyticsContextBuilder()
 
     async def execute(
         self,
@@ -115,7 +116,8 @@ class ContextOrchestrator:
             message=message,
             memory_context=memory_context,
             tool_results=tool_results,
-            plan=plan
+            plan=plan,
+            channel_uuid=channel_uuid
         )
 
         # Step 6: Store conversation in short-term memory (Redis)
@@ -504,7 +506,8 @@ class ContextOrchestrator:
         message: str,
         memory_context: dict[str, Any],
         tool_results: list[ToolResult],
-        plan: ExecutionPlan
+        plan: ExecutionPlan,
+        channel_uuid: Optional[UUID] = None
     ) -> str:
         """
         Call the LLM with full context to generate response.
@@ -514,12 +517,18 @@ class ContextOrchestrator:
             memory_context: Loaded memory context (including historical)
             tool_results: Results from tool execution
             plan: Execution plan for context
+            channel_uuid: Channel UUID for analytics context
 
         Returns:
             LLM-generated response string
         """
         # Load system prompt
         system_prompt = self._load_prompt("system")
+
+        # Build structured analytics context
+        analytics_context = self.analytics_builder.build_analytics_context(
+            channel_uuid
+        )
 
         # Build context for LLM
         context_parts = []
@@ -592,22 +601,70 @@ class ContextOrchestrator:
         full_context = "\n".join(
             context_parts) if context_parts else "No additional context."
 
+        # Build structured analytics section
+        analytics_section = self._build_analytics_prompt_section(analytics_context)
+
         # Build the prompt
         full_prompt = f"""
 {system_prompt}
+
+{analytics_section}
 
 Context:
 {full_context}
 
 User message: {message}
 
-Provide a helpful, data-backed response.
+Instructions:
+- Analyze performance based ONLY on the structured analytics data above
+- Compare current vs previous period if both are available
+- Do NOT guess or hallucinate numbers
+- If data is missing, explicitly say so
+- Provide a helpful, data-backed response
 """
 
         # Call LLM (stub implementation - replace with actual provider)
         response = await self._invoke_llm(full_prompt)
 
         return response
+
+    def _build_analytics_prompt_section(
+        self,
+        analytics_context: dict[str, Any]
+    ) -> str:
+        """
+        Build the structured analytics section for the LLM prompt.
+
+        Args:
+            analytics_context: Dictionary with current_period and previous_period data.
+
+        Returns:
+            Formatted analytics section string.
+        """
+        if not analytics_context:
+            return "## STRUCTURED ANALYTICS DATA\n\nNo analytics data available for this channel."
+
+        lines = ["## STRUCTURED ANALYTICS DATA (USE THESE EXACT NUMBERS)"]
+
+        # Current period
+        current = analytics_context.get("current_period")
+        if current:
+            lines.append(f"\nCurrent Period ({current.get('period', 'last_7_days')}):")
+            lines.append(f"- Views: {current.get('views', 0):,}")
+            lines.append(f"- Subscribers gained: {current.get('subscribers_gained', 0):,}")
+            lines.append(f"- Engagement rate: {current.get('engagement_rate', 0):.1f}%")
+            lines.append(f"- Avg watch time: {current.get('avg_watch_time_minutes', 0):.1f} minutes")
+
+        # Previous period
+        previous = analytics_context.get("previous_period")
+        if previous:
+            lines.append(f"\nPrevious Period ({previous.get('period', 'previous_7_days')}):")
+            lines.append(f"- Views: {previous.get('views', 0):,}")
+            lines.append(f"- Subscribers gained: {previous.get('subscribers_gained', 0):,}")
+            lines.append(f"- Engagement rate: {previous.get('engagement_rate', 0):.1f}%")
+            lines.append(f"- Avg watch time: {previous.get('avg_watch_time_minutes', 0):.1f} minutes")
+
+        return "\n".join(lines)
 
     async def _invoke_llm(self, prompt: str) -> str:
         """

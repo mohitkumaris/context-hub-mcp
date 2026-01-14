@@ -48,7 +48,22 @@ class LangChainGeminiClient:
         try:
             messages = [HumanMessage(content=prompt)]
             response = self.llm.invoke(messages)
-            return response.content
+            
+            # Handle different response formats from LangChain
+            content = response.content
+            
+            # If content is a list (new format), extract text from parts
+            if isinstance(content, list):
+                text_parts = []
+                for part in content:
+                    if isinstance(part, dict) and 'text' in part:
+                        text_parts.append(part['text'])
+                    elif isinstance(part, str):
+                        text_parts.append(part)
+                return ''.join(text_parts)
+            
+            # If content is already a string, return it directly
+            return str(content)
         except Exception as e:
             logger.error(f"LangChain Gemini generation failed: {e}")
             return f"Error generating response: {str(e)}"
