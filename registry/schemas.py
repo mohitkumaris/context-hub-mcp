@@ -5,7 +5,7 @@ Defines all request/response models and tool input/output schemas.
 """
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -74,8 +74,8 @@ class ExecuteResponse(BaseModel):
         description="Whether the execution completed successfully"
     )
 
-    content: str = Field(
-        ...,
+    content: Optional[str] = Field(
+        default=None,
         description="Main response content for the user"
     )
 
@@ -99,9 +99,9 @@ class ExecuteResponse(BaseModel):
         description="Execution metadata including timing and planning info"
     )
 
-    error: Optional[str] = Field(
+    error: Optional[Union[str, dict[str, Any]]] = Field(
         default=None,
-        description="Error message if execution partially or fully failed"
+        description="Error message or structured error object if execution failed"
     )
 
     class Config:
@@ -139,6 +139,85 @@ class HealthResponse(BaseModel):
     llm_provider: str = Field(
         ...,
         description="Configured LLM provider"
+    )
+
+
+# =============================================================================
+# Channel Connect Schemas (OAuth forwarding from API)
+# =============================================================================
+
+from uuid import UUID
+
+
+class ChannelConnectRequest(BaseModel):
+    """Request schema for /channels/connect endpoint.
+    
+    Receives OAuth channel connection data forwarded from the API
+    after a successful YouTube OAuth flow.
+    """
+
+    user_id: UUID = Field(
+        ...,
+        description="User's unique identifier"
+    )
+
+    youtube_channel_id: str = Field(
+        ...,
+        description="YouTube channel ID",
+        min_length=1,
+        max_length=255
+    )
+
+    channel_name: str = Field(
+        ...,
+        description="YouTube channel display name",
+        min_length=1,
+        max_length=255
+    )
+
+    access_token: str = Field(
+        ...,
+        description="OAuth access token"
+    )
+
+    refresh_token: Optional[str] = Field(
+        default=None,
+        description="OAuth refresh token"
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "user_id": "550e8400-e29b-41d4-a716-446655440000",
+                "youtube_channel_id": "UC_x5XG1OV2P6uZZ5FSM9Ttw",
+                "channel_name": "My YouTube Channel",
+                "access_token": "ya29.xxx...",
+                "refresh_token": "1//xxx..."
+            }
+        }
+
+
+class ChannelConnectResponse(BaseModel):
+    """Response schema for /channels/connect endpoint."""
+
+    success: bool = Field(
+        ...,
+        description="Whether the channel was connected successfully"
+    )
+
+    channel_id: str = Field(
+        ...,
+        description="YouTube channel ID"
+    )
+
+    channel_name: str = Field(
+        ...,
+        description="YouTube channel display name"
+    )
+
+    message: Optional[str] = Field(
+        default=None,
+        description="Additional status message"
     )
 
 

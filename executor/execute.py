@@ -12,7 +12,8 @@ All business logic flows through here.
 """
 
 import logging
-from typing import Any, Optional
+from datetime import datetime, timezone
+from typing import Any, Optional, Tuple
 from uuid import UUID
 
 from config import config
@@ -44,6 +45,9 @@ class ContextOrchestrator:
     5. Format and return response
     """
 
+    # Request limits by plan
+    FREE_DAILY_LIMIT = 3
+
     def __init__(self) -> None:
         """Initialize orchestrator with all required components."""
         self.planner = ExecutionPlanner()
@@ -54,6 +58,54 @@ class ContextOrchestrator:
         self.postgres_store = PostgresMemoryStore()
         self.gemini_client = LangChainGeminiClient()
         self.analytics_builder = AnalyticsContextBuilder()
+
+    async def _check_usage_limit(
+        self,
+        user_id: str,
+        user_plan: str
+    ) -> Tuple[bool, int]:
+        """
+        Check and increment usage count for a user.
+
+        Args:
+            user_id: Unique identifier for the user
+            user_plan: User's subscription plan (free/pro)
+
+        Returns:
+            Tuple of (is_allowed, current_count)
+        """
+        # PRO users have unlimited access
+        if user_plan.lower() == "pro":
+            return (True, 0)
+
+        # Build Redis key: usage:{user_id}:{YYYY-MM-DD}
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        usage_key = f"usage:{user_id}:{today}"
+
+        try:
+            client = await self.redis_store._ensure_connection()
+
+            # Increment and get the new count
+            current_count = await client.incr(usage_key)
+
+            # Set expiry to 24 hours on first increment
+            if current_count == 1:
+                await client.expire(usage_key, 86400)  # 24 hours
+
+            # Check if limit exceeded
+            if current_count > self.FREE_DAILY_LIMIT:
+                logger.warning(
+                    f"User {user_id} exceeded free daily limit "
+                    f"({current_count}/{self.FREE_DAILY_LIMIT})"
+                )
+                return (False, current_count)
+
+            return (True, current_count)
+
+        except Exception as e:
+            # Fail-open: allow request if Redis is unavailable
+            logger.error(f"Usage limit check failed (allowing request): {e}")
+            return (True, 0)
 
     async def execute(
         self,
@@ -76,6 +128,21 @@ class ContextOrchestrator:
         """
         metadata = metadata or {}
         tool_results: list[ToolResult] = []
+
+        # Get user plan early for usage limit check
+        user_plan = metadata.get("user_plan", "free")
+
+        # Step 0: Check usage limits (BEFORE any tool/LLM execution)
+        is_allowed, usage_count = await self._check_usage_limit(user_id, user_plan)
+        if not is_allowed:
+            return ExecuteResponse(
+                success=False,
+                error={
+                    "code": "PLAN_LIMIT_REACHED",
+                    "message": "You've reached your free analysis limit for today. "
+                               "Upgrade to PRO to unlock unlimited insights."
+                }
+            )
 
         # Convert string IDs to UUIDs for database operations
         user_uuid = self._safe_parse_uuid(user_id)
@@ -100,7 +167,6 @@ class ContextOrchestrator:
         )
 
         # Step 3: Check policy permissions
-        user_plan = metadata.get("user_plan", "free")
         approved_tools = self._filter_by_policy(plan, user_plan)
 
         # Step 4: Execute approved tools

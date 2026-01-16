@@ -54,10 +54,49 @@ The **Model Context Protocol** is an architectural pattern for building AI-power
 
 - **Clean HTTP API**: Single `/execute` endpoint for all context requests
 - **Plan-Based Access Control**: Free, Pro, and Agency tier tool restrictions
+- **Request-Based Usage Limits**: FREE users get 3 requests/day, PRO users unlimited
 - **Deterministic Planning**: Rule-based tool selection with explainable reasoning
 - **Memory Layers**: Redis for conversation state, PostgreSQL for historical data
 - **LLM Agnostic**: Configure any LLM provider via environment variables
 - **Docker Ready**: Production Dockerfile with health checks
+
+## Usage Limits
+
+The server enforces request-based usage limits to manage resource consumption by plan tier.
+
+### Limits by Plan
+
+| Plan | Daily Request Limit | Rate Tracking |
+|------|---------------------|---------------|
+| FREE | 3 requests/day      | Redis-based   |
+| PRO  | Unlimited           | No tracking   |
+
+### How It Works
+
+1. **Request Counter**: Each FREE user request increments a Redis counter with key `usage:{user_id}:{YYYY-MM-DD}`
+2. **Daily Reset**: Counters auto-expire after 24 hours (UTC-based)
+3. **Early Enforcement**: Limits are checked **before** any tool execution, analytics context building, or LLM calls
+4. **Fail-Open**: If Redis is unavailable, requests are allowed (graceful degradation)
+
+### Limit Exceeded Response
+
+When a FREE user exceeds their daily limit, the API returns:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "PLAN_LIMIT_REACHED",
+    "message": "You've reached your free analysis limit for today. Upgrade to PRO to unlock unlimited insights."
+  }
+}
+```
+
+**Important**: When limit is exceeded:
+- ❌ No tools are executed
+- ❌ No LLM is called
+- ❌ No analytics context is built
+- ✅ Fast response with upgrade message
 
 ## Project Structure
 
@@ -131,6 +170,15 @@ User ──┬── Channel ──┬── AnalyticsSnapshot
 - Redis (optional, falls back to in-memory)
 - PostgreSQL (optional, falls back to in-memory)
 
+> [!WARNING]
+> ### ⚠️ Development Note
+> 
+> During early development, a demo user is pre-created in the database with ID:
+> ```
+> 00000000-0000-0000-0000-000000000001
+> ```
+> This user is used to associate OAuth-connected YouTube channels until proper authentication is introduced.
+
 ### Local Development
 
 1. **Clone and navigate to the project:**
@@ -167,7 +215,7 @@ export DEBUG=true
 python server.py
 ```
 
-The server will start at `http://localhost:8000`.
+The server will start at `http://localhost:8001`.
 
 ### Docker Deployment
 
@@ -182,7 +230,7 @@ docker build -t context-hub-mcp .
 ```bash
 docker run -d \
   --name context-hub-mcp \
-  -p 8000:8000 \
+  -p 8001:8001 \
   -e LLM_PROVIDER=openai \
   -e LLM_API_KEY=your-api-key \
   -e LLM_MODEL=gpt-4 \
@@ -202,7 +250,7 @@ services:
   mcp:
     build: .
     ports:
-      - "8000:8000"
+      - "8001:8001"
     environment:
       - LLM_PROVIDER=openai
       - LLM_API_KEY=${LLM_API_KEY}
@@ -247,7 +295,7 @@ docker-compose up -d
 ### Base URL
 
 ```
-http://localhost:8000
+http://localhost:8001
 ```
 
 ### Endpoints Overview
@@ -269,7 +317,7 @@ Root endpoint with API information.
 **Request:**
 
 ```
-GET http://localhost:8000/
+GET http://localhost:8001/
 ```
 
 **Response:**
@@ -291,7 +339,7 @@ Health check endpoint for container orchestration.
 **Request:**
 
 ```
-GET http://localhost:8000/health
+GET http://localhost:8001/health
 ```
 
 **Response:**
@@ -313,7 +361,7 @@ Execute a context request with tool orchestration.
 **Request:**
 
 ```
-POST http://localhost:8000/execute
+POST http://localhost:8001/execute
 Content-Type: application/json
 ```
 
@@ -378,7 +426,7 @@ Content-Type: application/json
   "variable": [
     {
       "key": "base_url",
-      "value": "http://localhost:8000",
+      "value": "http://localhost:8001",
       "type": "string"
     }
   ],
@@ -855,24 +903,24 @@ After starting the server with `DEBUG=true python server.py`, test these URLs:
 
 | Endpoint     | URL                                    |
 | ------------ | -------------------------------------- |
-| Root         | `http://localhost:8000/`               |
-| Health       | `http://localhost:8000/health`         |
-| Swagger Docs | `http://localhost:8000/docs`           |
-| ReDoc        | `http://localhost:8000/redoc`          |
-| Execute      | `http://localhost:8000/execute` (POST) |
+| Root         | `http://localhost:8001/`               |
+| Health       | `http://localhost:8001/health`         |
+| Swagger Docs | `http://localhost:8001/docs`           |
+| ReDoc        | `http://localhost:8001/redoc`          |
+| Execute      | `http://localhost:8001/execute` (POST) |
 
 ### Sample cURL Commands
 
 **Health Check:**
 
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:8001/health
 ```
 
 **Execute Request:**
 
 ```bash
-curl -X POST http://localhost:8000/execute \
+curl -X POST http://localhost:8001/execute \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "user_123",
@@ -889,7 +937,7 @@ All configuration is via environment variables:
 | Variable            | Default       | Description             |
 | ------------------- | ------------- | ----------------------- |
 | `SERVER_HOST`       | `0.0.0.0`     | Server bind host        |
-| `SERVER_PORT`       | `8000`        | Server bind port        |
+| `SERVER_PORT`       | `8001`        | Server bind port        |
 | `DEBUG`             | `false`       | Enable debug mode       |
 | `LOG_LEVEL`         | `INFO`        | Logging level           |
 | `CORS_ORIGINS`      | `*`           | Allowed CORS origins    |

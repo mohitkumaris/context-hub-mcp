@@ -99,7 +99,7 @@ class LLMConfig:
     gemini_api_key: Optional[str] = field(
         default_factory=lambda: os.getenv("GEMINI_API_KEY"))
     gemini_model: str = field(
-        default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite"))
+        default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-flash-latest"))
 
 
 
@@ -110,7 +110,7 @@ class ServerConfig:
     host: str = field(default_factory=lambda: os.getenv(
         "SERVER_HOST", "0.0.0.0"))
     port: int = field(default_factory=lambda: int(
-        os.getenv("SERVER_PORT", "8000")))
+        os.getenv("SERVER_PORT", "8001")))
     debug: bool = field(default_factory=lambda: os.getenv(
         "DEBUG", "false").lower() == "true")
     log_level: str = field(
