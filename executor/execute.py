@@ -158,6 +158,35 @@ class ContextOrchestrator:
             channel_uuid, user_uuid)
         memory_context["historical"] = historical_context
 
+        # Step 1c: Inject channel context for tools (OAuth + analytics)
+        # Try to load channel by UUID first, then fall back to YouTube channel ID
+        channel = None
+        try:
+            if channel_uuid:
+                channel = self.postgres_store.get_channel_by_id(channel_uuid)
+            
+            # Fallback: If UUID lookup failed, try by YouTube channel ID
+            if not channel and channel_id:
+                channel = self.postgres_store.get_channel_by_youtube_id(channel_id)
+                if channel:
+                    # Update channel_uuid for later use in historical context
+                    channel_uuid = channel.id
+                    logger.debug(f"Channel resolved by YouTube ID: {channel_id} -> {channel_uuid}")
+            
+            if channel:
+                memory_context["channel"] = {
+                    "id": str(channel.id),
+                    "youtube_channel_id": channel.youtube_channel_id,
+                    "channel_name": channel.channel_name,
+                    "access_token": channel.access_token,
+                    "refresh_token": channel.refresh_token,
+                }
+                logger.info(f"Channel context injected for {channel.channel_name}")
+            else:
+                logger.warning(f"No channel found for channel_id={channel_id}")
+        except Exception as e:
+            logger.error(f"Failed to load channel context: {e}")
+
         # Step 2: Plan tool execution (with historical context)
         logger.debug("Planning tool execution")
         plan = self.planner.create_plan(

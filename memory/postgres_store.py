@@ -18,6 +18,7 @@ from db.session import SessionLocal
 from db.models.analytics_snapshot import AnalyticsSnapshot
 from db.models.weekly_insight import WeeklyInsight
 from db.models.chat_session import ChatSession
+from db.models.channel import Channel
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,54 @@ class PostgresMemoryStore:
     # -------------------------------------------------------------------------
     # READ METHODS
     # -------------------------------------------------------------------------
+
+    def get_channel_by_id(self, channel_id: UUID) -> Optional[Channel]:
+        """
+        Retrieve a channel by its UUID.
+
+        Args:
+            channel_id: The UUID of the channel.
+
+        Returns:
+            The Channel object, or None if not found.
+        """
+        session = self._get_session()
+        try:
+            channel = (
+                session.query(Channel)
+                .filter(Channel.id == channel_id)
+                .first()
+            )
+            return channel
+        except Exception as e:
+            logger.error(f"Error fetching channel by ID: {e}")
+            raise
+        finally:
+            session.close()
+
+    def get_channel_by_youtube_id(self, youtube_channel_id: str) -> Optional[Channel]:
+        """
+        Retrieve a channel by its YouTube channel ID.
+
+        Args:
+            youtube_channel_id: The YouTube channel ID string (e.g., UC0FDx7Q3QHg3ivswUBNrWsw).
+
+        Returns:
+            The Channel object, or None if not found.
+        """
+        session = self._get_session()
+        try:
+            channel = (
+                session.query(Channel)
+                .filter(Channel.youtube_channel_id == youtube_channel_id)
+                .first()
+            )
+            return channel
+        except Exception as e:
+            logger.error(f"Error fetching channel by YouTube ID: {e}")
+            raise
+        finally:
+            session.close()
 
     def get_latest_analytics_snapshot(
         self, channel_id: UUID
