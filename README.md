@@ -118,15 +118,25 @@ context-hub-mcp/
 │   ├── tools.py           # Tool registry with 17 tools
 │   ├── schemas.py         # Pydantic request/response models
 │   ├── policies.py        # Plan-based access control (FREE/PRO/AGENCY)
-│   └── handlers/          # Handler implementations by category
-│       ├── analytics.py   # fetch_analytics, compute_metrics, generate_chart
-│       ├── insight.py     # analyze_data, generate_insight, get_recommendations
-│       ├── report.py      # generate_report, summarize_data
-│       ├── memory.py      # recall_context, search_history
-│       ├── action.py      # execute_action, schedule_task
-│       ├── search.py      # search_data
-│       └── youtube.py     # get_channel_snapshot, get_top_videos,
-│                          # video_post_mortem, weekly_growth_report
+│   ├── handlers/          # Handler implementations by category
+│   │   ├── analytics.py   # fetch_analytics, compute_metrics, generate_chart
+│   │   ├── insight.py     # analyze_data, generate_insight, get_recommendations
+│   │   ├── report.py      # generate_report, summarize_data
+│   │   ├── memory.py      # recall_context, search_history
+│   │   ├── action.py      # execute_action, schedule_task
+│   │   ├── search.py      # search_data
+│   │   └── youtube.py     # get_channel_snapshot, get_top_videos,
+│   │                      # video_post_mortem, weekly_growth_report
+│   └── tool_handlers/     # Real API tool implementations
+│       └── fetch_analytics.py  # Real YouTube Analytics ingestion
+│
+├── clients/               # External API clients
+│   └── youtube_analytics.py    # YouTube Analytics API OAuth client
+│
+├── analytics/             # Analytics processing
+│   ├── context_builder.py # Build analytics context for LLM
+│   ├── fetcher.py         # Fetch data from YouTube Analytics API
+│   └── normalizer.py      # Normalize API responses to snapshot format
 │
 ├── db/                    # Database models and session management
 │   ├── __init__.py        # Package exports
@@ -142,7 +152,7 @@ context-hub-mcp/
 │
 ├── memory/                # Data persistence
 │   ├── redis_store.py     # Short-term memory (conversations)
-│   └── postgres_store.py  # Long-term memory (analytics)
+│   └── postgres_store.py  # Long-term memory (analytics, channels)
 │
 ├── tests/                 # Unit tests
 │   └── test_server.py     # Server endpoint tests (37 tests)
@@ -151,6 +161,67 @@ context-hub-mcp/
     ├── system.txt         # Core system prompt
     └── analysis.txt       # Deep analysis mode prompt
 ```
+
+## YouTube Analytics Integration
+
+The server supports **real YouTube Analytics data ingestion** via OAuth. When a channel is connected, the `fetch_analytics` tool fetches live data from the YouTube Analytics API.
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     YouTube Analytics Flow                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  1. Channel connected via OAuth (access_token stored)           │
+│                          ▼                                       │
+│  2. User sends analytics request                                │
+│                          ▼                                       │
+│  3. Executor loads channel context with OAuth tokens            │
+│                          ▼                                       │
+│  4. fetch_analytics tool calls YouTube Analytics API            │
+│                          ▼                                       │
+│  5. Response normalized to AnalyticsSnapshot format             │
+│                          ▼                                       │
+│  6. Snapshot persisted to PostgreSQL                            │
+│                          ▼                                       │
+│  7. LLM uses real data for insights (no hallucination)          │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Metrics Fetched
+
+| Metric | Description |
+|--------|-------------|
+| `views` | Total views in last 7 days |
+| `subscribers` | Subscribers gained in last 7 days |
+| `estimatedMinutesWatched` | Total watch time in minutes |
+| `averageViewDuration` | Average view duration in seconds |
+
+### Channel Context Injection
+
+The executor automatically injects channel OAuth tokens into the tool context:
+
+```python
+# Available in all tools via input_data["context"]["channel"]
+{
+    "id": "uuid-of-channel",
+    "youtube_channel_id": "UC...",
+    "channel_name": "My Channel",
+    "access_token": "ya29...",
+    "refresh_token": "1//..."
+}
+```
+
+### Required Dependencies
+
+```
+google-api-python-client>=2.100.0
+google-auth>=2.23.0
+google-auth-oauthlib>=1.1.0
+```
+
 
 ### Database Model Relationships
 
