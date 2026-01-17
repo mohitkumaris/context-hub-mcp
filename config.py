@@ -121,6 +121,15 @@ class ServerConfig:
 
 
 @dataclass
+class FlagsConfig:
+    """Feature flags for testing and development."""
+
+    force_pro_mode: bool = field(
+        default_factory=lambda: os.getenv("FORCE_PRO_MODE", "false").lower() == "true"
+    )
+
+
+@dataclass
 class Config:
     """
     Root configuration object aggregating all config sections.
@@ -135,6 +144,7 @@ class Config:
     postgres: PostgresConfig = field(default_factory=PostgresConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
+    flags: FlagsConfig = field(default_factory=FlagsConfig)
 
     def validate(self) -> list[str]:
         """

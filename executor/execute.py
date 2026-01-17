@@ -132,6 +132,11 @@ class ContextOrchestrator:
         # Get user plan early for usage limit check
         user_plan = metadata.get("user_plan", "free")
 
+        # FORCE_PRO_MODE override for testing
+        if config.flags.force_pro_mode:
+            user_plan = "pro"
+            logger.info("FORCE_PRO_MODE enabled — user treated as PRO")
+
         # Step 0: Check usage limits (BEFORE any tool/LLM execution)
         is_allowed, usage_count = await self._check_usage_limit(user_id, user_plan)
         if not is_allowed:
