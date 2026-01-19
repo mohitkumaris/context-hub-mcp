@@ -88,6 +88,14 @@ class ExecutionPlanner:
             r"\b(find|search|look for|where|locate)\b",
             r"\b(show me|get|fetch|retrieve)\b",
             r"\b(list|display|what are)\b"
+        ],
+        "video_analysis": [
+            r"\b(last|latest|recent|newest)\s+(video|upload|content)\b",
+            r"\b(my|the)\s+(last|latest|recent)\s+video\b",
+            r"\b(how|what).*(last|latest|recent)\s+video.*(perform|doing)\b",
+            r"\bnext video\s+(improve|ideas?|suggestion|tip)\b",
+            r"\b(improve|better)\s+(next|my)\s+video\b",
+            r"\blast upload.*(perform|analyz|review)\b"
         ]
     }
 
@@ -99,6 +107,7 @@ class ExecutionPlanner:
         "memory": ["recall_context", "search_history"],
         "action": ["execute_action", "schedule_task"],
         "search": ["search_data", "recall_context"],
+        "video_analysis": ["fetch_last_video_analytics", "recall_context"],
         "general": ["recall_context"]  # Default fallback
     }
 
@@ -376,7 +385,8 @@ class ExecutionPlanner:
             "search_history": f"Required for '{intent}' intent - searching past data",
             "execute_action": f"Required for '{intent}' intent - action execution requested",
             "schedule_task": f"Required for '{intent}' intent - task scheduling requested",
-            "search_data": f"Required for '{intent}' intent - data search requested"
+            "search_data": f"Required for '{intent}' intent - data search requested",
+            "fetch_last_video_analytics": f"Required for '{intent}' intent - analyzing latest video performance"
         }
 
         return reasons.get(tool_name, f"Selected for '{intent}' intent processing")

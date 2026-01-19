@@ -80,18 +80,26 @@ class AnalyticsFetcher:
         return response
 
 
-def fetch_analytics_for_channel(access_token: str) -> dict[str, Any]:
+def fetch_analytics_for_channel(
+    access_token: str,
+    refresh_token: str | None = None
+) -> dict[str, Any]:
     """
     Convenience function to fetch analytics for a channel.
     
     Creates a client and fetcher, then retrieves the last 7 days of data.
+    Supports automatic token refresh if OAuth credentials expire.
     
     Args:
         access_token: OAuth access token for the channel.
+        refresh_token: Optional OAuth refresh token for automatic token refresh.
         
     Returns:
         Raw API response with analytics data.
     """
-    client = YouTubeAnalyticsClient(access_token)
+    client = YouTubeAnalyticsClient(
+        access_token=access_token,
+        refresh_token=refresh_token
+    )
     fetcher = AnalyticsFetcher(client)
     return fetcher.fetch_last_7_days()

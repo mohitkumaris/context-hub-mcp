@@ -29,8 +29,8 @@ class LangChainGeminiClient:
             model=self.model_name,
             google_api_key=self.api_key,
             temperature=0.3,
-            max_output_tokens=512,
-            convert_system_message_to_human=True # Gemini sometimes needs this
+            max_output_tokens=2048,  # Increased for longer responses
+            convert_system_message_to_human=True  # Gemini sometimes needs this
         )
         
         logger.info(f"Initialized LangChain Gemini client with model: {self.model_name}")
@@ -49,6 +49,11 @@ class LangChainGeminiClient:
             messages = [HumanMessage(content=prompt)]
             response = self.llm.invoke(messages)
             
+            # Debug logging to trace the response
+            logger.debug(f"LLM response type: {type(response)}")
+            logger.debug(f"LLM response content type: {type(response.content)}")
+            logger.debug(f"LLM response content: {response.content[:500] if response.content else 'EMPTY'}")
+            
             # Handle different response formats from LangChain
             content = response.content
             
@@ -60,10 +65,15 @@ class LangChainGeminiClient:
                         text_parts.append(part['text'])
                     elif isinstance(part, str):
                         text_parts.append(part)
-                return ''.join(text_parts)
+                result = ''.join(text_parts)
+                if not result:
+                    logger.warning(f"LLM returned empty content from list format: {content}")
+                return result
             
             # If content is already a string, return it directly
-            return str(content)
+            if not content:
+                logger.warning("LLM returned empty string content")
+            return str(content) if content else ""
         except Exception as e:
             logger.error(f"LangChain Gemini generation failed: {e}")
             return f"Error generating response: {str(e)}"

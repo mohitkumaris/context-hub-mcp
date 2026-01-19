@@ -179,6 +179,22 @@ class ContextOrchestrator:
                     logger.debug(f"Channel resolved by YouTube ID: {channel_id} -> {channel_uuid}")
             
             if channel:
+                # SECURITY: Verify channel ownership before proceeding
+                # Prevents cross-account data leaks
+                if user_uuid and channel.user_id != user_uuid:
+                    logger.warning(
+                        f"Channel ownership mismatch: channel {channel.id} belongs to "
+                        f"user {channel.user_id}, but request is from user {user_uuid}"
+                    )
+                    return ExecuteResponse(
+                        success=False,
+                        error={
+                            "code": "CHANNEL_ACCESS_DENIED",
+                            "message": "You do not have access to this channel. "
+                                       "Please connect your own YouTube channel."
+                        }
+                    )
+                
                 memory_context["channel"] = {
                     "id": str(channel.id),
                     "youtube_channel_id": channel.youtube_channel_id,
@@ -704,11 +720,16 @@ class ContextOrchestrator:
         # Build structured analytics section
         analytics_section = self._build_analytics_prompt_section(analytics_context)
 
+        # Build video analytics section from tool results
+        video_analytics_section = self._build_video_analytics_prompt_section(tool_results)
+
         # Build the prompt
         full_prompt = f"""
 {system_prompt}
 
 {analytics_section}
+
+{video_analytics_section}
 
 Context:
 {full_context}
@@ -721,6 +742,14 @@ Instructions:
 - Do NOT guess or hallucinate numbers
 - If data is missing, explicitly say so
 - Provide a helpful, data-backed response
+
+When analyzing the user's latest video (if LAST VIDEO ANALYTICS data is present):
+- Analyze performance ONLY from the provided data
+- Explain what worked well based on the metrics
+- Explain what could be improved based on the metrics
+- Provide exactly 3 actionable improvement suggestions for future videos
+- Provide exactly 3 specific ideas for the next video based on current performance
+- Do NOT hallucinate metrics - only use the exact numbers provided
 """
 
         # Call LLM (stub implementation - replace with actual provider)
@@ -763,6 +792,60 @@ Instructions:
             lines.append(f"- Subscribers gained: {previous.get('subscribers_gained', 0):,}")
             lines.append(f"- Engagement rate: {previous.get('engagement_rate', 0):.1f}%")
             lines.append(f"- Avg watch time: {previous.get('avg_watch_time_minutes', 0):.1f} minutes")
+
+        return "\n".join(lines)
+
+    def _build_video_analytics_prompt_section(
+        self,
+        tool_results: list[ToolResult]
+    ) -> str:
+        """
+        Build the last video analytics section for the LLM prompt.
+
+        Extracts video analytics from fetch_last_video_analytics tool results
+        and formats them for the LLM.
+
+        Args:
+            tool_results: List of tool execution results.
+
+        Returns:
+            Formatted video analytics section string, or empty if not available.
+        """
+        # Find the fetch_last_video_analytics result
+        video_data = None
+        for result in tool_results:
+            if result.tool_name == "fetch_last_video_analytics" and result.success:
+                output = result.output
+                if isinstance(output, dict) and output.get("data"):
+                    video_data = output["data"]
+                    break
+
+        if not video_data:
+            return ""
+
+        lines = ["## LAST VIDEO ANALYTICS (USE EXACT NUMBERS)"]
+        
+        # Video info
+        lines.append(f"\nVideo: {video_data.get('title', 'Unknown')}")
+        lines.append(f"Video ID: {video_data.get('video_id', 'N/A')}")
+        lines.append(f"Published: {video_data.get('published_at', 'N/A')}")
+        
+        # Performance metrics
+        lines.append("\nPerformance Metrics:")
+        views = video_data.get('views', 0)
+        lines.append(f"- Views: {views:,}")
+        
+        avg_watch_seconds = video_data.get('avg_watch_time_seconds', 0)
+        avg_watch_minutes = avg_watch_seconds / 60 if avg_watch_seconds else 0
+        lines.append(f"- Avg Watch Time: {avg_watch_minutes:.1f} minutes ({avg_watch_seconds:.0f} seconds)")
+        
+        engagement_rate = video_data.get('engagement_rate', 0)
+        lines.append(f"- Engagement Rate: {engagement_rate:.2f}%")
+        
+        likes = video_data.get('likes', 0)
+        comments = video_data.get('comments', 0)
+        lines.append(f"- Likes: {likes:,}")
+        lines.append(f"- Comments: {comments:,}")
 
         return "\n".join(lines)
 

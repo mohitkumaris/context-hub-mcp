@@ -75,9 +75,15 @@ async def handle_fetch_analytics(input_data: dict[str, Any]) -> ToolResult:
         logger.info(f"Fetching analytics for channel {channel_name} ({channel_uuid})")
         logger.info(f"Calling YouTube Analytics API for channel {channel_uuid}")
         
+        # Extract refresh_token for automatic token refresh
+        refresh_token = channel_data.get("refresh_token")
+        
         # Step 1: Fetch analytics from YouTube Analytics API
         try:
-            raw_response = fetch_analytics_for_channel(access_token)
+            raw_response = fetch_analytics_for_channel(
+                access_token=access_token,
+                refresh_token=refresh_token
+            )
         except Exception as api_error:
             logger.error(f"YouTube Analytics API error: {api_error}")
             return ToolResult(
