@@ -765,24 +765,62 @@ When analyzing the user's latest video (if LAST VIDEO ANALYTICS data is present)
         Build the structured analytics section for the LLM prompt.
 
         Args:
-            analytics_context: Dictionary with current_period and previous_period data.
+            analytics_context: Dictionary with current_period, previous_period data,
+                             and availability flags (has_ctr, has_retention, has_traffic_sources).
 
         Returns:
-            Formatted analytics section string.
+            Formatted analytics section string with availability status.
         """
-        if not analytics_context:
-            return "## STRUCTURED ANALYTICS DATA\n\nNo analytics data available for this channel."
+        lines = []
+        
+        # Always include availability flags first (required by prompt rules)
+        has_ctr = analytics_context.get("has_ctr", False)
+        has_retention = analytics_context.get("has_retention", False)
+        has_traffic_sources = analytics_context.get("has_traffic_sources", False)
+        
+        lines.append("ANALYTICS AVAILABILITY STATUS:")
+        lines.append(f"- CTR available: {has_ctr}")
+        lines.append(f"- Audience retention available: {has_retention}")
+        lines.append(f"- Traffic source data available: {has_traffic_sources}")
+        lines.append("")
+        
+        current = analytics_context.get("current_period")
+        if not current:
+            lines.append("## STRUCTURED ANALYTICS DATA")
+            lines.append("")
+            lines.append("No analytics data available for this channel.")
+            return "\n".join(lines)
 
-        lines = ["## STRUCTURED ANALYTICS DATA (USE THESE EXACT NUMBERS)"]
+        lines.append("## STRUCTURED ANALYTICS DATA (USE THESE EXACT NUMBERS)")
 
         # Current period
-        current = analytics_context.get("current_period")
-        if current:
-            lines.append(f"\nCurrent Period ({current.get('period', 'last_7_days')}):")
-            lines.append(f"- Views: {current.get('views', 0):,}")
-            lines.append(f"- Subscribers gained: {current.get('subscribers_gained', 0):,}")
-            lines.append(f"- Engagement rate: {current.get('engagement_rate', 0):.1f}%")
-            lines.append(f"- Avg watch time: {current.get('avg_watch_time_minutes', 0):.1f} minutes")
+        lines.append(f"\nCurrent Period ({current.get('period', 'last_7_days')}):")
+        lines.append(f"- Views: {current.get('views', 0):,}")
+        lines.append(f"- Subscribers gained: {current.get('subscribers_gained', 0):,}")
+        
+        # Extended metrics (only if available)
+        if current.get('impressions') is not None:
+            lines.append(f"- Impressions: {current.get('impressions'):,}")
+        
+        if current.get('ctr') is not None:
+            ctr_pct = current['ctr'] * 100 if current['ctr'] < 1 else current['ctr']
+            lines.append(f"- CTR: {ctr_pct:.1f}%")
+        
+        lines.append(f"- Avg watch time: {current.get('avg_watch_time_minutes', 0):.1f} minutes")
+        
+        if current.get('avg_view_percentage') is not None:
+            lines.append(f"- Avg view percentage: {current.get('avg_view_percentage'):.1f}%")
+        
+        # Traffic sources (only if available)
+        if has_traffic_sources and current.get('traffic_sources'):
+            lines.append("\nTraffic Sources:")
+            traffic = current['traffic_sources']
+            total_traffic = sum(traffic.values()) if traffic else 0
+            if total_traffic > 0:
+                sorted_sources = sorted(traffic.items(), key=lambda x: x[1], reverse=True)
+                for source, views in sorted_sources[:5]:
+                    pct = (views / total_traffic) * 100
+                    lines.append(f"- {source}: {pct:.0f}%")
 
         # Previous period
         previous = analytics_context.get("previous_period")
@@ -790,7 +828,14 @@ When analyzing the user's latest video (if LAST VIDEO ANALYTICS data is present)
             lines.append(f"\nPrevious Period ({previous.get('period', 'previous_7_days')}):")
             lines.append(f"- Views: {previous.get('views', 0):,}")
             lines.append(f"- Subscribers gained: {previous.get('subscribers_gained', 0):,}")
-            lines.append(f"- Engagement rate: {previous.get('engagement_rate', 0):.1f}%")
+            
+            if previous.get('impressions') is not None:
+                lines.append(f"- Impressions: {previous.get('impressions'):,}")
+            
+            if previous.get('ctr') is not None:
+                ctr_pct = previous['ctr'] * 100 if previous['ctr'] < 1 else previous['ctr']
+                lines.append(f"- CTR: {ctr_pct:.1f}%")
+            
             lines.append(f"- Avg watch time: {previous.get('avg_watch_time_minutes', 0):.1f} minutes")
 
         return "\n".join(lines)

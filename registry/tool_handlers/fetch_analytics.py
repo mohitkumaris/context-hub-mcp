@@ -1,8 +1,8 @@
 """
 fetch_analytics MCP Tool.
 
-Fetches real YouTube Analytics data, normalizes it, and persists
-it as an AnalyticsSnapshot to the database.
+Fetches real YouTube Analytics data including extended metrics,
+normalizes it, and persists it as an AnalyticsSnapshot to the database.
 """
 
 import logging
@@ -23,8 +23,8 @@ async def handle_fetch_analytics(input_data: dict[str, Any]) -> ToolResult:
     Handle the fetch_analytics tool execution.
     
     Fetches real YouTube Analytics data using the OAuth access_token
-    from context["channel"], normalizes the response, and persists 
-    it as an AnalyticsSnapshot.
+    from context["channel"], normalizes the response (including CTR,
+    retention, and traffic sources), and persists it as an AnalyticsSnapshot.
     
     Args:
         input_data: Dictionary containing:
@@ -73,17 +73,18 @@ async def handle_fetch_analytics(input_data: dict[str, Any]) -> ToolResult:
             channel_uuid = channel_id
         
         logger.info(f"Fetching analytics for channel {channel_name} ({channel_uuid})")
-        logger.info(f"Calling YouTube Analytics API for channel {channel_uuid}")
+        logger.info(f"API request start: Calling YouTube Analytics API for channel {channel_uuid}")
         
         # Extract refresh_token for automatic token refresh
         refresh_token = channel_data.get("refresh_token")
         
-        # Step 1: Fetch analytics from YouTube Analytics API
+        # Step 1: Fetch analytics from YouTube Analytics API (now includes traffic sources)
         try:
             raw_response = fetch_analytics_for_channel(
                 access_token=access_token,
                 refresh_token=refresh_token
             )
+            logger.info("API response received: core metrics and traffic sources fetched")
         except Exception as api_error:
             logger.error(f"YouTube Analytics API error: {api_error}")
             return ToolResult(
@@ -92,7 +93,7 @@ async def handle_fetch_analytics(input_data: dict[str, Any]) -> ToolResult:
                 error=f"YouTube Analytics API error: {str(api_error)}"
             )
         
-        # Step 2: Normalize the response
+        # Step 2: Normalize the response (includes extended metrics)
         normalized = normalize_analytics_response(raw_response)
         
         if not normalized:
@@ -107,18 +108,32 @@ async def handle_fetch_analytics(input_data: dict[str, Any]) -> ToolResult:
                 }
             )
         
-        # Step 3: Create and persist AnalyticsSnapshot
+        # Log fetched metrics
+        logger.info(
+            f"Fetched analytics: views={normalized.get('views')} "
+            f"ctr={normalized.get('avg_ctr')} "
+            f"retention={normalized.get('avg_view_percentage')}"
+        )
+        
+        # Step 3: Create and persist AnalyticsSnapshot with extended fields
         snapshot = AnalyticsSnapshot(
             channel_id=channel_uuid,
             period=normalized["period"],
             views=normalized["views"],
             subscribers=normalized["subscribers"],
-            avg_ctr=normalized["avg_ctr"],
-            avg_watch_time_minutes=normalized["avg_watch_time_minutes"]
+            avg_ctr=normalized.get("avg_ctr"),
+            avg_watch_time_minutes=normalized["avg_watch_time_minutes"],
+            impressions=normalized.get("impressions"),
+            avg_view_percentage=normalized.get("avg_view_percentage"),
+            traffic_sources=normalized.get("traffic_sources")
         )
         
         postgres_store.save_analytics_snapshot(snapshot)
         logger.info(f"Analytics snapshot persisted for channel {channel_uuid}")
+        
+        # Log traffic sources if available
+        if normalized.get("traffic_sources"):
+            logger.info(f"Traffic sources: {list(normalized['traffic_sources'].keys())}")
         
         return ToolResult(
             tool_name="fetch_analytics",
