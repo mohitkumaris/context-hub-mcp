@@ -53,6 +53,8 @@ The **Model Context Protocol** is an architectural pattern for building AI-power
 ## Features
 
 - **Clean HTTP API**: Single `/execute` endpoint for all context requests
+- **Extended Analytics**: CTR, impressions, retention, and traffic source metrics
+- **Availability Flags**: Graceful handling of missing metrics with explicit flags
 - **Plan-Based Access Control**: Free, Pro, and Agency tier tool restrictions
 - **Request-Based Usage Limits**: FREE users get 3 requests/day, PRO users unlimited
 - **Deterministic Planning**: Rule-based tool selection with explainable reasoning
@@ -195,9 +197,39 @@ The server supports **real YouTube Analytics data ingestion** via OAuth. When a 
 | Metric | Description |
 |--------|-------------|
 | `views` | Total views in last 7 days |
+| `impressions` | How often thumbnails were shown |
+| `impressionsClickThroughRate` | CTR (click-through rate) |
+| `averageViewPercentage` | Audience retention percentage |
 | `subscribers` | Subscribers gained in last 7 days |
 | `estimatedMinutesWatched` | Total watch time in minutes |
 | `averageViewDuration` | Average view duration in seconds |
+
+### Traffic Sources
+
+The `fetch_analytics` tool also retrieves traffic source breakdown:
+
+| Source | Description |
+|--------|-------------|
+| `YT_SEARCH` | Views from YouTube search |
+| `SUGGESTED` | Views from suggested videos |
+| `BROWSE_FEATURES` | Views from browse/home page |
+| `EXTERNAL` | Views from external websites |
+
+### Analytics Availability Flags
+
+The context builder computes availability flags for graceful handling of missing metrics:
+
+```python
+{
+  "current_period": {...},
+  "previous_period": {...},
+  "has_ctr": True,         # impressions > 0
+  "has_retention": True,   # avg_view_percentage is not None
+  "has_traffic_sources": True  # traffic_sources not empty
+}
+```
+
+These flags are injected into LLM prompts to ensure the AI only analyzes available data and explicitly states when metrics are missing.
 
 ### Channel Context Injection
 
