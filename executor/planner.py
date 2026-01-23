@@ -88,6 +88,14 @@ class ExecutionPlanner:
             r"\b(find|search|look for|where|locate)\b",
             r"\b(show me|get|fetch|retrieve)\b",
             r"\b(list|display|what are)\b"
+        ],
+        "video_analysis": [
+            r"\b(last|latest|recent|newest)\s+(video|upload|content)\b",
+            r"\b(my|the)\s+(last|latest|recent)\s+video\b",
+            r"\b(how|what).*(last|latest|recent)\s+video.*(perform|doing)\b",
+            r"\bnext video\s+(improve|ideas?|suggestion|tip)\b",
+            r"\b(improve|better)\s+(next|my)\s+video\b",
+            r"\blast upload.*(perform|analyz|review)\b"
         ]
     }
 
@@ -99,6 +107,7 @@ class ExecutionPlanner:
         "memory": ["recall_context", "search_history"],
         "action": ["execute_action", "schedule_task"],
         "search": ["search_data", "recall_context"],
+        "video_analysis": ["fetch_last_video_analytics", "recall_context"],
         "general": ["recall_context"]  # Default fallback
     }
 
@@ -146,6 +155,18 @@ class ExecutionPlanner:
 
         logger.info(
             f"Intent classified as '{intent}' with confidence {confidence:.2f}")
+
+        # Step 1b: Rule-based override for analytics intent
+        # Force analytics intent when channel context exists and message
+        # contains analytics-related keywords
+        intent, confidence = self._apply_analytics_override(
+            message, memory_context, intent, confidence
+        )
+        if plan.intent_classification != intent:
+            logger.info(
+                f"Intent overridden to '{intent}' via analytics rule")
+            plan.intent_classification = intent
+            plan.confidence = confidence
 
         # Step 2: Check if deep analysis is needed
         plan.requires_deep_analysis = self._needs_deep_analysis(
@@ -210,6 +231,72 @@ class ExecutionPlanner:
         confidence = 0.5 + (confidence * 0.5)
 
         return (best_intent, round(confidence, 2))
+
+    def _apply_analytics_override(
+        self,
+        message: str,
+        memory_context: dict[str, Any],
+        current_intent: str,
+        current_confidence: float
+    ) -> tuple[str, float]:
+        """
+        Apply rule-based override to force analytics intent when appropriate.
+
+        Forces 'analytics' intent when:
+        - Channel context is present in memory_context
+        - Message contains analytics-related keywords
+
+        Args:
+            message: User's message text
+            memory_context: Available memory context
+            current_intent: The initially classified intent
+            current_confidence: The initial confidence score
+
+        Returns:
+            Tuple of (intent_name, confidence_score) - may be unchanged
+        """
+        # Check if channel context exists (indicating channel_id is present)
+        historical = memory_context.get("historical", {})
+        has_channel_context = (
+            historical.get("latest_snapshot") is not None or
+            historical.get("recent_insights") is not None
+        )
+
+        if not has_channel_context:
+            # No channel context - no override
+            return (current_intent, current_confidence)
+
+        # Analytics keywords that should trigger override
+        analytics_keywords = [
+            r"\bperformance\b",
+            r"\bviews\b",
+            r"\bsubscribers\b",
+            r"\bgrowth\b",
+            r"\bengagement\b",
+            r"\banalytics\b",
+            r"\bthis week\b",
+            r"\blast week\b",
+            r"\bmetrics\b",
+            r"\bperforming\b",
+            r"\bhow.*(did|is|was|are).*channel\b",
+            r"\bchannel.*(doing|perform|growth)\b"
+        ]
+
+        message_lower = message.lower()
+        keyword_found = False
+
+        for pattern in analytics_keywords:
+            if re.search(pattern, message_lower, re.IGNORECASE):
+                keyword_found = True
+                logger.debug(
+                    f"Analytics keyword matched: {pattern}")
+                break
+
+        if keyword_found:
+            # Force analytics intent with high confidence
+            return ("analytics", 0.95)
+
+        return (current_intent, current_confidence)
 
     def _needs_deep_analysis(self, message: str, intent: str) -> bool:
         """
@@ -298,7 +385,8 @@ class ExecutionPlanner:
             "search_history": f"Required for '{intent}' intent - searching past data",
             "execute_action": f"Required for '{intent}' intent - action execution requested",
             "schedule_task": f"Required for '{intent}' intent - task scheduling requested",
-            "search_data": f"Required for '{intent}' intent - data search requested"
+            "search_data": f"Required for '{intent}' intent - data search requested",
+            "fetch_last_video_analytics": f"Required for '{intent}' intent - analyzing latest video performance"
         }
 
         return reasons.get(tool_name, f"Selected for '{intent}' intent processing")

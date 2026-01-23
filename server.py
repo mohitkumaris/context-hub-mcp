@@ -87,7 +87,7 @@ async def health_check() -> HealthResponse:
     return HealthResponse(
         status="healthy",
         version="1.0.0",
-        llm_provider=config.llm.provider
+        llm_provider=config.llm.gemini_model
     )
 
 
@@ -157,6 +157,99 @@ async def root() -> dict[str, str]:
         "version": "1.0.0",
         "docs": "/docs" if config.server.debug else "Disabled in production"
     }
+
+
+# =============================================================================
+# Channel Connect Endpoint (OAuth forwarding from API)
+# =============================================================================
+
+from datetime import datetime
+from fastapi import Depends
+from sqlalchemy.orm import Session
+from db.session import get_db
+from db.models.channel import Channel
+from registry.schemas import ChannelConnectRequest, ChannelConnectResponse
+
+
+@app.post(
+    "/channels/connect",
+    response_model=ChannelConnectResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Channels"]
+)
+def connect_channel(
+    request: ChannelConnectRequest,
+    db: Session = Depends(get_db),
+) -> ChannelConnectResponse:
+    """Connect a YouTube channel after OAuth flow.
+    
+    Receives OAuth channel data forwarded from the API and persists
+    the channel connection. Uses upsert logic to handle reconnections.
+    
+    Args:
+        request: ChannelConnectRequest with OAuth tokens and channel info
+        db: Database session
+    
+    Returns:
+        ChannelConnectResponse with connection status
+    """
+    logger.info(
+        f"Channel connect request: user={request.user_id}, "
+        f"channel_id={request.youtube_channel_id}"
+    )
+    
+    try:
+        # Check if channel already exists for this user
+        existing_channel = db.query(Channel).filter(
+            Channel.user_id == request.user_id,
+            Channel.youtube_channel_id == request.youtube_channel_id
+        ).first()
+        
+        if existing_channel:
+            # Update existing channel with new tokens
+            existing_channel.channel_name = request.channel_name
+            existing_channel.access_token = request.access_token
+            if request.refresh_token:
+                existing_channel.refresh_token = request.refresh_token
+            existing_channel.updated_at = datetime.utcnow()
+            
+            db.commit()
+            logger.info(f"Updated existing channel for user_id={request.user_id}")
+            
+            return ChannelConnectResponse(
+                success=True,
+                channel_id=request.youtube_channel_id,
+                channel_name=request.channel_name,
+                message="Channel reconnected successfully"
+            )
+        else:
+            # Create new channel connection
+            new_channel = Channel(
+                user_id=request.user_id,
+                youtube_channel_id=request.youtube_channel_id,
+                channel_name=request.channel_name,
+                access_token=request.access_token,
+                refresh_token=request.refresh_token,
+            )
+            db.add(new_channel)
+            db.commit()
+            
+            logger.info(f"Created new channel for user_id={request.user_id}")
+            
+            return ChannelConnectResponse(
+                success=True,
+                channel_id=request.youtube_channel_id,
+                channel_name=request.channel_name,
+                message="Channel connected successfully"
+            )
+    
+    except Exception as e:
+        db.rollback()
+        logger.exception(f"Channel connect failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to connect channel"
+        )
 
 
 if __name__ == "__main__":

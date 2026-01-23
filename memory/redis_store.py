@@ -316,6 +316,32 @@ class InMemoryRedisStub:
         """Delete a key."""
         self._store.pop(key, None)
 
+    async def incr(self, key: str) -> int:
+        """Increment a key's value by 1, creating it if it doesn't exist."""
+        if key in self._store:
+            value, expiry = self._store[key]
+            # Check if expired
+            if expiry is not None and expiry <= datetime.now(timezone.utc).timestamp():
+                del self._store[key]
+                self._store[key] = ("1", None)
+                return 1
+            # Increment existing value
+            new_value = int(value) + 1
+            self._store[key] = (str(new_value), expiry)
+            return new_value
+        else:
+            self._store[key] = ("1", None)
+            return 1
+
+    async def expire(self, key: str, ttl: int) -> bool:
+        """Set expiry on a key."""
+        if key in self._store:
+            value, _ = self._store[key]
+            expiry = datetime.now(timezone.utc).timestamp() + ttl
+            self._store[key] = (value, expiry)
+            return True
+        return False
+
     async def ping(self) -> bool:
         """Health check."""
         return True

@@ -96,6 +96,11 @@ class LLMConfig:
         os.getenv("LLM_TEMPERATURE", "0.7")))
     timeout: int = field(default_factory=lambda: int(
         os.getenv("LLM_TIMEOUT", "60")))
+    gemini_api_key: Optional[str] = field(
+        default_factory=lambda: os.getenv("GEMINI_API_KEY"))
+    gemini_model: str = field(
+        default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-flash-latest"))
+
 
 
 @dataclass
@@ -105,13 +110,22 @@ class ServerConfig:
     host: str = field(default_factory=lambda: os.getenv(
         "SERVER_HOST", "0.0.0.0"))
     port: int = field(default_factory=lambda: int(
-        os.getenv("SERVER_PORT", "8000")))
+        os.getenv("SERVER_PORT", "8001")))
     debug: bool = field(default_factory=lambda: os.getenv(
         "DEBUG", "false").lower() == "true")
     log_level: str = field(
         default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
     cors_origins: list[str] = field(
         default_factory=lambda: os.getenv("CORS_ORIGINS", "*").split(",")
+    )
+
+
+@dataclass
+class FlagsConfig:
+    """Feature flags for testing and development."""
+
+    force_pro_mode: bool = field(
+        default_factory=lambda: os.getenv("FORCE_PRO_MODE", "false").lower() == "true"
     )
 
 
@@ -130,6 +144,7 @@ class Config:
     postgres: PostgresConfig = field(default_factory=PostgresConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
+    flags: FlagsConfig = field(default_factory=FlagsConfig)
 
     def validate(self) -> list[str]:
         """
@@ -140,8 +155,8 @@ class Config:
         """
         warnings = []
 
-        if not self.llm.api_key:
-            warnings.append("LLM_API_KEY not set - LLM calls will fail")
+        if not self.llm.api_key and not self.llm.gemini_api_key:
+            warnings.append("No LLM API key set - LLM calls will fail")
 
         if not self.redis.password and not self.server.debug:
             warnings.append("REDIS_PASSWORD not set in production mode")

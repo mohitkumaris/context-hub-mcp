@@ -17,6 +17,11 @@ psycopg2-binary>=2.9.9          # PostgreSQL adapter (sync, for Alembic)
 
 # HTTP Client
 httpx>=0.26.0                   # Modern async HTTP client for LLM API calls
+google-generativeai>=0.3.0      # Google Gemini Python SDK
+langchain>=0.1.0                # LangChain framework
+langchain-core>=0.1.0           # Core LangChain abstractions
+langchain-community>=0.0.10     # Community integrations
+langchain-google-genai>=0.0.5   # Google Gemini for LangChain
 aiohttp>=3.9.0                  # Async HTTP client/server framework
 
 # Configuration
@@ -41,3 +46,9 @@ structlog>=24.1.0               # Structured logging with context
 # pytest>=7.4.0                 # Testing framework
 # pytest-asyncio>=0.23.0        # Async test support for pytest
 # pytest-cov>=4.1.0             # Code coverage reporting
+
+# Google APIs (YouTube Analytics)
+google-api-python-client>=2.100.0  # Google API client for YouTube Analytics
+google-auth>=2.23.0                # Google authentication library
+google-auth-oauthlib>=1.1.0        # OAuth2 support for Google APIs
+

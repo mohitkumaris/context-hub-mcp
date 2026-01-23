@@ -33,6 +33,7 @@ from .handlers import (
     SearchHandlers,
     YouTubeHandlers,
 )
+from .tool_handlers import handle_fetch_analytics, handle_fetch_last_video_analytics
 
 logger = logging.getLogger(__name__)
 
@@ -75,28 +76,38 @@ class ToolRegistry:
 
     def _register_analytics_tools(self) -> None:
         """Register analytics-related tools."""
+        # Real YouTube Analytics ingestion tool
         self._register_tool(ToolDefinition(
             name="fetch_analytics",
-            description="Fetch analytics data for a channel or time period",
+            description="Fetch real YouTube Analytics data for the connected channel. Uses OAuth access_token from context to call YouTube Analytics API, normalizes the response, and persists an AnalyticsSnapshot to the database.",
             input_schema={
                 "type": "object",
                 "properties": {
                     "message": {"type": "string"},
-                    "context": {"type": "object"},
-                    "time_range": {"type": "string", "default": "7d"},
-                    "metrics": {"type": "array", "items": {"type": "string"}}
+                    "context": {
+                        "type": "object",
+                        "description": "Context containing channel OAuth tokens (injected by executor)"
+                    }
                 },
-                "required": ["message", "context"]
+                "required": ["context"]
             },
             output_schema={
                 "type": "object",
                 "properties": {
-                    "data": {"type": "object"},
-                    "period": {"type": "string"},
-                    "metrics": {"type": "object"}
+                    "message": {"type": "string"},
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "period": {"type": "string"},
+                            "views": {"type": "integer"},
+                            "subscribers": {"type": "integer"},
+                            "avg_ctr": {"type": "number"},
+                            "avg_watch_time_minutes": {"type": "number"}
+                        }
+                    }
                 }
             },
-            handler=AnalyticsHandlers.fetch_analytics,
+            handler=handle_fetch_analytics,
             category="analytics",
             requires_plan="free"
         ))
@@ -630,6 +641,46 @@ class ToolRegistry:
             },
             handler=YouTubeHandlers.weekly_growth_report,
             category="report",
+            requires_plan="pro"
+        ))
+
+        # PRO-only: Fetch last video analytics for performance analysis
+        self._register_tool(ToolDefinition(
+            name="fetch_last_video_analytics",
+            description="Fetch performance analytics for the most recently published video. Returns structured metrics including views, watch time, and engagement rate for AI-powered video analysis and recommendations. PRO-only feature.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string"},
+                    "context": {
+                        "type": "object",
+                        "description": "Context containing channel OAuth tokens (injected by executor)"
+                    }
+                },
+                "required": ["context"]
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string"},
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "video_id": {"type": "string", "description": "YouTube video ID"},
+                            "title": {"type": "string", "description": "Video title"},
+                            "published_at": {"type": "string", "format": "date-time", "description": "ISO format publish date"},
+                            "views": {"type": "integer", "description": "Total view count"},
+                            "avg_watch_time_seconds": {"type": "number", "description": "Average watch time in seconds"},
+                            "engagement_rate": {"type": "number", "description": "Engagement rate as percentage ((likes + comments) / views * 100)"},
+                            "likes": {"type": "integer", "description": "Total like count"},
+                            "comments": {"type": "integer", "description": "Total comment count"}
+                        },
+                        "required": ["video_id", "title", "published_at", "views", "avg_watch_time_seconds", "engagement_rate"]
+                    }
+                }
+            },
+            handler=handle_fetch_last_video_analytics,
+            category="analytics",
             requires_plan="pro"
         ))
 

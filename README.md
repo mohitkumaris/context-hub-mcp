@@ -53,11 +53,52 @@ The **Model Context Protocol** is an architectural pattern for building AI-power
 ## Features
 
 - **Clean HTTP API**: Single `/execute` endpoint for all context requests
+- **Extended Analytics**: CTR, impressions, retention, and traffic source metrics
+- **Availability Flags**: Graceful handling of missing metrics with explicit flags
 - **Plan-Based Access Control**: Free, Pro, and Agency tier tool restrictions
+- **Request-Based Usage Limits**: FREE users get 3 requests/day, PRO users unlimited
 - **Deterministic Planning**: Rule-based tool selection with explainable reasoning
 - **Memory Layers**: Redis for conversation state, PostgreSQL for historical data
 - **LLM Agnostic**: Configure any LLM provider via environment variables
 - **Docker Ready**: Production Dockerfile with health checks
+
+## Usage Limits
+
+The server enforces request-based usage limits to manage resource consumption by plan tier.
+
+### Limits by Plan
+
+| Plan | Daily Request Limit | Rate Tracking |
+|------|---------------------|---------------|
+| FREE | 3 requests/day      | Redis-based   |
+| PRO  | Unlimited           | No tracking   |
+
+### How It Works
+
+1. **Request Counter**: Each FREE user request increments a Redis counter with key `usage:{user_id}:{YYYY-MM-DD}`
+2. **Daily Reset**: Counters auto-expire after 24 hours (UTC-based)
+3. **Early Enforcement**: Limits are checked **before** any tool execution, analytics context building, or LLM calls
+4. **Fail-Open**: If Redis is unavailable, requests are allowed (graceful degradation)
+
+### Limit Exceeded Response
+
+When a FREE user exceeds their daily limit, the API returns:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "PLAN_LIMIT_REACHED",
+    "message": "You've reached your free analysis limit for today. Upgrade to PRO to unlock unlimited insights."
+  }
+}
+```
+
+**Important**: When limit is exceeded:
+- ❌ No tools are executed
+- ❌ No LLM is called
+- ❌ No analytics context is built
+- ✅ Fast response with upgrade message
 
 ## Project Structure
 
@@ -79,15 +120,25 @@ context-hub-mcp/
 │   ├── tools.py           # Tool registry with 17 tools
 │   ├── schemas.py         # Pydantic request/response models
 │   ├── policies.py        # Plan-based access control (FREE/PRO/AGENCY)
-│   └── handlers/          # Handler implementations by category
-│       ├── analytics.py   # fetch_analytics, compute_metrics, generate_chart
-│       ├── insight.py     # analyze_data, generate_insight, get_recommendations
-│       ├── report.py      # generate_report, summarize_data
-│       ├── memory.py      # recall_context, search_history
-│       ├── action.py      # execute_action, schedule_task
-│       ├── search.py      # search_data
-│       └── youtube.py     # get_channel_snapshot, get_top_videos,
-│                          # video_post_mortem, weekly_growth_report
+│   ├── handlers/          # Handler implementations by category
+│   │   ├── analytics.py   # fetch_analytics, compute_metrics, generate_chart
+│   │   ├── insight.py     # analyze_data, generate_insight, get_recommendations
+│   │   ├── report.py      # generate_report, summarize_data
+│   │   ├── memory.py      # recall_context, search_history
+│   │   ├── action.py      # execute_action, schedule_task
+│   │   ├── search.py      # search_data
+│   │   └── youtube.py     # get_channel_snapshot, get_top_videos,
+│   │                      # video_post_mortem, weekly_growth_report
+│   └── tool_handlers/     # Real API tool implementations
+│       └── fetch_analytics.py  # Real YouTube Analytics ingestion
+│
+├── clients/               # External API clients
+│   └── youtube_analytics.py    # YouTube Analytics API OAuth client
+│
+├── analytics/             # Analytics processing
+│   ├── context_builder.py # Build analytics context for LLM
+│   ├── fetcher.py         # Fetch data from YouTube Analytics API
+│   └── normalizer.py      # Normalize API responses to snapshot format
 │
 ├── db/                    # Database models and session management
 │   ├── __init__.py        # Package exports
@@ -103,7 +154,7 @@ context-hub-mcp/
 │
 ├── memory/                # Data persistence
 │   ├── redis_store.py     # Short-term memory (conversations)
-│   └── postgres_store.py  # Long-term memory (analytics)
+│   └── postgres_store.py  # Long-term memory (analytics, channels)
 │
 ├── tests/                 # Unit tests
 │   └── test_server.py     # Server endpoint tests (37 tests)
@@ -112,6 +163,121 @@ context-hub-mcp/
     ├── system.txt         # Core system prompt
     └── analysis.txt       # Deep analysis mode prompt
 ```
+
+## YouTube Analytics Integration
+
+The server supports **real YouTube Analytics data ingestion** via OAuth. When a channel is connected, the `fetch_analytics` tool fetches live data from the YouTube Analytics API.
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     YouTube Analytics Flow                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  1. Channel connected via OAuth (access_token stored)           │
+│                          ▼                                       │
+│  2. User sends analytics request                                │
+│                          ▼                                       │
+│  3. Executor loads channel context with OAuth tokens            │
+│                          ▼                                       │
+│  4. fetch_analytics tool calls YouTube Analytics API            │
+│                          ▼                                       │
+│  5. Response normalized to AnalyticsSnapshot format             │
+│                          ▼                                       │
+│  6. Snapshot persisted to PostgreSQL                            │
+│                          ▼                                       │
+│  7. LLM uses real data for insights (no hallucination)          │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Metrics Fetched
+
+| Metric | Description |
+|--------|-------------|
+| `views` | Total views in last 7 days |
+| `impressions` | How often thumbnails were shown |
+| `impressionsClickThroughRate` | CTR (click-through rate) |
+| `averageViewPercentage` | Audience retention percentage |
+| `subscribers` | Subscribers gained in last 7 days |
+| `estimatedMinutesWatched` | Total watch time in minutes |
+| `averageViewDuration` | Average view duration in seconds |
+
+### Traffic Sources
+
+The `fetch_analytics` tool also retrieves traffic source breakdown:
+
+| Source | Description |
+|--------|-------------|
+| `YT_SEARCH` | Views from YouTube search |
+| `SUGGESTED` | Views from suggested videos |
+| `BROWSE_FEATURES` | Views from browse/home page |
+| `EXTERNAL` | Views from external websites |
+
+### Analytics Availability Flags
+
+The context builder computes availability flags for graceful handling of missing metrics:
+
+```python
+{
+  "current_period": {...},
+  "previous_period": {...},
+  "has_ctr": True,         # impressions > 0
+  "has_retention": True,   # avg_view_percentage is not None
+  "has_traffic_sources": True  # traffic_sources not empty
+}
+```
+
+These flags are injected into LLM prompts to ensure the AI only analyzes available data and explicitly states when metrics are missing.
+
+### Automatic Token Refresh
+
+The server automatically handles **expired OAuth access tokens** using the stored refresh token:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Token Refresh Flow                            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  1. API call attempted with access_token                         │
+│                          ▼                                       │
+│  2. Token detected as expired                                    │
+│                          ▼                                       │
+│  3. Automatic refresh using refresh_token                        │
+│                          ▼                                       │
+│  4. New access_token obtained                                    │
+│                          ▼                                       │
+│  5. API call retried with fresh token                            │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+This ensures uninterrupted analytics access without requiring users to reconnect their channel. If refresh fails, a clear error message prompts the user to reconnect.
+
+### Channel Context Injection
+
+The executor automatically injects channel OAuth tokens into the tool context:
+
+```python
+# Available in all tools via input_data["context"]["channel"]
+{
+    "id": "uuid-of-channel",
+    "youtube_channel_id": "UC...",
+    "channel_name": "My Channel",
+    "access_token": "ya29...",
+    "refresh_token": "1//..."
+}
+```
+
+### Required Dependencies
+
+```
+google-api-python-client>=2.100.0
+google-auth>=2.23.0
+google-auth-oauthlib>=1.1.0
+```
+
 
 ### Database Model Relationships
 
@@ -130,6 +296,15 @@ User ──┬── Channel ──┬── AnalyticsSnapshot
 - Docker (optional, for containerized deployment)
 - Redis (optional, falls back to in-memory)
 - PostgreSQL (optional, falls back to in-memory)
+
+> [!WARNING]
+> ### ⚠️ Development Note
+> 
+> During early development, a demo user is pre-created in the database with ID:
+> ```
+> 00000000-0000-0000-0000-000000000001
+> ```
+> This user is used to associate OAuth-connected YouTube channels until proper authentication is introduced.
 
 ### Local Development
 
@@ -167,87 +342,14 @@ export DEBUG=true
 python server.py
 ```
 
-The server will start at `http://localhost:8000`.
-
-### Docker Deployment
-
-1. **Build the image:**
-
-```bash
-docker build -t context-hub-mcp .
-```
-
-2. **Run the container:**
-
-```bash
-docker run -d \
-  --name context-hub-mcp \
-  -p 8000:8000 \
-  -e LLM_PROVIDER=openai \
-  -e LLM_API_KEY=your-api-key \
-  -e LLM_MODEL=gpt-4 \
-  -e REDIS_HOST=redis \
-  -e POSTGRES_HOST=postgres \
-  context-hub-mcp
-```
-
-### Docker Compose (with dependencies)
-
-Create a `docker-compose.yml`:
-
-```yaml
-version: "3.8"
-
-services:
-  mcp:
-    build: .
-    ports:
-      - "8000:8000"
-    environment:
-      - LLM_PROVIDER=openai
-      - LLM_API_KEY=${LLM_API_KEY}
-      - LLM_MODEL=gpt-4
-      - REDIS_HOST=redis
-      - POSTGRES_HOST=postgres
-      - POSTGRES_USER=mcp
-      - POSTGRES_PASSWORD=mcp_secret
-      - POSTGRES_DB=context_hub
-    depends_on:
-      - redis
-      - postgres
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      - POSTGRES_USER=mcp
-      - POSTGRES_PASSWORD=mcp_secret
-      - POSTGRES_DB=context_hub
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-
-volumes:
-  pgdata:
-```
-
-Run with:
-
-```bash
-docker-compose up -d
-```
+The server will start at `http://localhost:8001`.
 
 ## API Reference
 
 ### Base URL
 
 ```
-http://localhost:8000
+http://localhost:8001
 ```
 
 ### Endpoints Overview
@@ -269,7 +371,7 @@ Root endpoint with API information.
 **Request:**
 
 ```
-GET http://localhost:8000/
+GET http://localhost:8001/
 ```
 
 **Response:**
@@ -291,7 +393,7 @@ Health check endpoint for container orchestration.
 **Request:**
 
 ```
-GET http://localhost:8000/health
+GET http://localhost:8001/health
 ```
 
 **Response:**
@@ -313,7 +415,7 @@ Execute a context request with tool orchestration.
 **Request:**
 
 ```
-POST http://localhost:8000/execute
+POST http://localhost:8001/execute
 Content-Type: application/json
 ```
 
@@ -378,7 +480,7 @@ Content-Type: application/json
   "variable": [
     {
       "key": "base_url",
-      "value": "http://localhost:8000",
+      "value": "http://localhost:8001",
       "type": "string"
     }
   ],
@@ -855,24 +957,24 @@ After starting the server with `DEBUG=true python server.py`, test these URLs:
 
 | Endpoint     | URL                                    |
 | ------------ | -------------------------------------- |
-| Root         | `http://localhost:8000/`               |
-| Health       | `http://localhost:8000/health`         |
-| Swagger Docs | `http://localhost:8000/docs`           |
-| ReDoc        | `http://localhost:8000/redoc`          |
-| Execute      | `http://localhost:8000/execute` (POST) |
+| Root         | `http://localhost:8001/`               |
+| Health       | `http://localhost:8001/health`         |
+| Swagger Docs | `http://localhost:8001/docs`           |
+| ReDoc        | `http://localhost:8001/redoc`          |
+| Execute      | `http://localhost:8001/execute` (POST) |
 
 ### Sample cURL Commands
 
 **Health Check:**
 
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:8001/health
 ```
 
 **Execute Request:**
 
 ```bash
-curl -X POST http://localhost:8000/execute \
+curl -X POST http://localhost:8001/execute \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "user_123",
@@ -889,7 +991,7 @@ All configuration is via environment variables:
 | Variable            | Default       | Description             |
 | ------------------- | ------------- | ----------------------- |
 | `SERVER_HOST`       | `0.0.0.0`     | Server bind host        |
-| `SERVER_PORT`       | `8000`        | Server bind port        |
+| `SERVER_PORT`       | `8001`        | Server bind port        |
 | `DEBUG`             | `false`       | Enable debug mode       |
 | `LOG_LEVEL`         | `INFO`        | Logging level           |
 | `CORS_ORIGINS`      | `*`           | Allowed CORS origins    |

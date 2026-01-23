@@ -84,6 +84,7 @@ class PolicyEngine:
         "search_history": Plan.PRO.value,
         "video_post_mortem": Plan.PRO.value,      # Video performance analysis
         "weekly_growth_report": Plan.PRO.value,   # Weekly growth reports
+        "fetch_last_video_analytics": Plan.PRO.value,  # Last video analysis
 
         # =====================================================================
         # AGENCY tier tools - Actions, automation, and premium features
@@ -112,10 +113,10 @@ class PolicyEngine:
                 # All FREE tools
                 "fetch_analytics", "summarize_data", "recall_context", 
                 "search_data", "get_channel_snapshot", "get_top_videos",
-                # PRO tools
                 "compute_metrics", "generate_chart", "analyze_data", 
                 "generate_insight", "generate_report", "search_history",
-                "video_post_mortem", "weekly_growth_report"
+                "video_post_mortem", "weekly_growth_report",
+                "fetch_last_video_analytics"
             },
             daily_requests=500,
             max_context_length=16000,
@@ -128,10 +129,10 @@ class PolicyEngine:
                 # All FREE tools
                 "fetch_analytics", "summarize_data", "recall_context", 
                 "search_data", "get_channel_snapshot", "get_top_videos",
-                # All PRO tools
                 "compute_metrics", "generate_chart", "analyze_data", 
                 "generate_insight", "generate_report", "search_history",
                 "video_post_mortem", "weekly_growth_report",
+                "fetch_last_video_analytics",
                 # AGENCY tools
                 "get_recommendations", "execute_action", "schedule_task"
             },
