@@ -13,12 +13,17 @@ from typing import Any, Optional
 from uuid import UUID
 
 from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+from config import config
 from registry.base import ToolResult
 
 logger = logging.getLogger(__name__)
+
+# Google OAuth endpoints
+TOKEN_URI = "https://oauth2.googleapis.com/token"
 
 
 class YouTubeVideoFetcher:
@@ -26,23 +31,59 @@ class YouTubeVideoFetcher:
     Fetches video data from YouTube Data API and Analytics API.
     
     Uses OAuth credentials to fetch the most recently published video
-    and its analytics metrics.
+    and its analytics metrics. Automatically refreshes expired tokens.
     """
     
-    def __init__(self, access_token: str) -> None:
+    def __init__(
+        self,
+        access_token: str,
+        refresh_token: str | None = None,
+        client_id: str | None = None,
+        client_secret: str | None = None
+    ) -> None:
         """
-        Initialize the fetcher with OAuth access token.
+        Initialize the fetcher with OAuth credentials.
         
         Args:
             access_token: OAuth access token for authenticated API calls.
+            refresh_token: OAuth refresh token for automatic token refresh.
+            client_id: Google OAuth client ID (defaults to config).
+            client_secret: Google OAuth client secret (defaults to config).
         """
         self.access_token = access_token
+        self.refresh_token = refresh_token
+        self.client_id = client_id or getattr(config, 'google_client_id', None)
+        self.client_secret = client_secret or getattr(config, 'google_client_secret', None)
         self._data_service = None
         self._analytics_service = None
+        self._credentials = None
     
     def _get_credentials(self) -> Credentials:
-        """Build OAuth credentials from access token."""
-        return Credentials(token=self.access_token)
+        """Build OAuth credentials with refresh support."""
+        if self._credentials is None:
+            self._credentials = Credentials(
+                token=self.access_token,
+                refresh_token=self.refresh_token,
+                token_uri=TOKEN_URI,
+                client_id=self.client_id,
+                client_secret=self.client_secret
+            )
+        
+        # Refresh if expired
+        if self._credentials.expired and self._credentials.refresh_token:
+            logger.info("Access token expired, refreshing...")
+            try:
+                self._credentials.refresh(Request())
+                self.access_token = self._credentials.token
+                logger.info("Access token refreshed successfully")
+            except Exception as e:
+                logger.error(f"Failed to refresh access token: {e}")
+                raise RuntimeError(
+                    "Access token expired and refresh failed. "
+                    "Please reconnect your YouTube channel."
+                ) from e
+        
+        return self._credentials
     
     def _get_data_service(self) -> Any:
         """Get or create YouTube Data API service."""
@@ -214,10 +255,16 @@ async def handle_fetch_last_video_analytics(input_data: dict[str, Any]) -> ToolR
             error="Channel has no access_token. Please reconnect YouTube."
         )
     
+    # Extract refresh_token for automatic token refresh
+    refresh_token = channel_data.get("refresh_token")
+    
     logger.info(f"[PRO] Fetching last video analytics for channel: {channel_name}")
     
     try:
-        fetcher = YouTubeVideoFetcher(access_token)
+        fetcher = YouTubeVideoFetcher(
+            access_token=access_token,
+            refresh_token=refresh_token
+        )
         
         # Step 1: Get the latest video
         video = fetcher.get_latest_video()

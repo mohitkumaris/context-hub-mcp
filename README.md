@@ -231,6 +231,30 @@ The context builder computes availability flags for graceful handling of missing
 
 These flags are injected into LLM prompts to ensure the AI only analyzes available data and explicitly states when metrics are missing.
 
+### Automatic Token Refresh
+
+The server automatically handles **expired OAuth access tokens** using the stored refresh token:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Token Refresh Flow                            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  1. API call attempted with access_token                         │
+│                          ▼                                       │
+│  2. Token detected as expired                                    │
+│                          ▼                                       │
+│  3. Automatic refresh using refresh_token                        │
+│                          ▼                                       │
+│  4. New access_token obtained                                    │
+│                          ▼                                       │
+│  5. API call retried with fresh token                            │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+This ensures uninterrupted analytics access without requiring users to reconnect their channel. If refresh fails, a clear error message prompts the user to reconnect.
+
 ### Channel Context Injection
 
 The executor automatically injects channel OAuth tokens into the tool context:
