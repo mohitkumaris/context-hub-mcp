@@ -18,7 +18,7 @@ from registry.base import ToolResult
 logger = logging.getLogger(__name__)
 
 
-async def handle_fetch_analytics(input_data: dict[str, Any]) -> ToolResult:
+async def handle_fetch_analytics(input_data: dict[str, Any]) -> dict[str, Any]:
     """
     Handle the fetch_analytics tool execution.
     
@@ -31,7 +31,7 @@ async def handle_fetch_analytics(input_data: dict[str, Any]) -> ToolResult:
             - context: Dict with "channel" key containing OAuth tokens
             
     Returns:
-        ToolResult with success status and normalized analytics data.
+        Dict with normalized analytics data.
     """
     # Extract channel from context (injected by executor)
     context = input_data.get("context", {})
@@ -39,11 +39,7 @@ async def handle_fetch_analytics(input_data: dict[str, Any]) -> ToolResult:
     
     if not channel_data:
         logger.warning("fetch_analytics called without channel context")
-        return ToolResult(
-            tool_name="fetch_analytics",
-            success=False,
-            error="No channel context available. Please connect a YouTube channel first."
-        )
+        raise ValueError("No channel context available. Please connect a YouTube channel first.")
     
     channel_id = channel_data.get("id")
     access_token = channel_data.get("access_token")
@@ -51,110 +47,92 @@ async def handle_fetch_analytics(input_data: dict[str, Any]) -> ToolResult:
     
     if not channel_id:
         logger.error("Channel context missing 'id' field")
-        return ToolResult(
-            tool_name="fetch_analytics",
-            success=False,
-            error="Channel context is incomplete (missing id)"
-        )
+        raise ValueError("Channel context is incomplete (missing id)")
     
     if not access_token:
         logger.error(f"No access_token for channel {channel_name}")
-        return ToolResult(
-            tool_name="fetch_analytics",
-            success=False,
-            error="Channel has no access_token. Please reconnect YouTube."
-        )
+        raise ValueError("Channel has no access_token. Please reconnect YouTube.")
     
+    # Convert to UUID if string
+    if isinstance(channel_id, str):
+        channel_uuid = UUID(channel_id)
+    else:
+        channel_uuid = channel_id
+    
+    logger.info(f"Fetching analytics for channel {channel_name} ({channel_uuid})")
+    
+    # Extract refresh_token for automatic token refresh
+    refresh_token = channel_data.get("refresh_token")
+    
+    # Determine period — default 7d, planner may request 28d
+    period = input_data.get("period", "7d")
+    
+    # Step 1: Fetch analytics from YouTube Analytics API
     try:
-        # Convert to UUID if string
-        if isinstance(channel_id, str):
-            channel_uuid = UUID(channel_id)
-        else:
-            channel_uuid = channel_id
-        
-        logger.info(f"Fetching analytics for channel {channel_name} ({channel_uuid})")
-        logger.info(f"API request start: Calling YouTube Analytics API for channel {channel_uuid}")
-        
-        # Extract refresh_token for automatic token refresh
-        refresh_token = channel_data.get("refresh_token")
-        
-        # Step 1: Fetch analytics from YouTube Analytics API (now includes traffic sources)
+        raw_response = fetch_analytics_for_channel(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            period=period
+        )
+        logger.info(f"API response received: core metrics and traffic sources fetched (period={period})")
+    except Exception as api_error:
+        logger.error(f"YouTube Analytics API error: {api_error}")
+        raise RuntimeError(f"YouTube Analytics API error: {str(api_error)}")
+    
+    # Step 2: Normalize the response
+    normalized = normalize_analytics_response(raw_response, period=period)
+    
+    if not normalized:
+        logger.warning(f"No analytics data available for channel {channel_uuid}")
+        return {
+            "message": "No analytics data available yet. "
+                       "Data may take 24-48 hours to appear for new channels.",
+            "data": {}
+        }
+    
+    # Step 2b: If compare_periods is set, also fetch 7d data for comparison
+    normalized_7d = None
+    if input_data.get("compare_periods") and period == "28d":
         try:
-            raw_response = fetch_analytics_for_channel(
+            raw_response_7d = fetch_analytics_for_channel(
                 access_token=access_token,
-                refresh_token=refresh_token
+                refresh_token=refresh_token,
+                period="7d"
             )
-            logger.info("API response received: core metrics and traffic sources fetched")
-        except Exception as api_error:
-            logger.error(f"YouTube Analytics API error: {api_error}")
-            return ToolResult(
-                tool_name="fetch_analytics",
-                success=False,
-                error=f"YouTube Analytics API error: {str(api_error)}"
-            )
-        
-        # Step 2: Normalize the response (includes extended metrics)
-        normalized = normalize_analytics_response(raw_response)
-        
-        if not normalized:
-            logger.warning(f"No analytics data available for channel {channel_uuid}")
-            return ToolResult(
-                tool_name="fetch_analytics",
-                success=True,
-                output={
-                    "message": "No analytics data available yet. "
-                               "Data may take 24-48 hours to appear for new channels.",
-                    "data": {}
-                }
-            )
-        
-        # Log fetched metrics
-        logger.info(
-            f"Fetched analytics: views={normalized.get('views')} "
-            f"ctr={normalized.get('avg_ctr')} "
-            f"retention={normalized.get('avg_view_percentage')}"
-        )
-        
-        # Step 3: Create and persist AnalyticsSnapshot with extended fields
-        snapshot = AnalyticsSnapshot(
-            channel_id=channel_uuid,
-            period=normalized["period"],
-            views=normalized["views"],
-            subscribers=normalized["subscribers"],
-            avg_ctr=normalized.get("avg_ctr"),
-            avg_watch_time_minutes=normalized["avg_watch_time_minutes"],
-            impressions=normalized.get("impressions"),
-            avg_view_percentage=normalized.get("avg_view_percentage"),
-            traffic_sources=normalized.get("traffic_sources")
-        )
-        
-        postgres_store.save_analytics_snapshot(snapshot)
-        logger.info(f"Analytics snapshot persisted for channel {channel_uuid}")
-        
-        # Log traffic sources if available
-        if normalized.get("traffic_sources"):
-            logger.info(f"Traffic sources: {list(normalized['traffic_sources'].keys())}")
-        
-        return ToolResult(
-            tool_name="fetch_analytics",
-            success=True,
-            output={
-                "message": "Analytics fetched and persisted successfully",
-                "data": normalized
-            }
-        )
-        
-    except ValueError as e:
-        logger.error(f"Invalid channel_id format: {e}")
-        return ToolResult(
-            tool_name="fetch_analytics",
-            success=False,
-            error=f"Invalid channel_id format: {str(e)}"
-        )
-    except Exception as e:
-        logger.exception(f"Unexpected error in fetch_analytics: {e}")
-        return ToolResult(
-            tool_name="fetch_analytics",
-            success=False,
-            error=f"Unexpected error: {str(e)}"
-        )
+            normalized_7d = normalize_analytics_response(raw_response_7d, period="last_7_days")
+            logger.info("Also fetched 7d data for period comparison")
+        except Exception as e:
+            logger.warning(f"Failed to fetch 7d comparison data: {e}")
+    
+    # Log fetched metrics
+    logger.info(
+        f"Fetched analytics: views={normalized.get('views')} "
+        f"ctr={normalized.get('avg_ctr')} "
+        f"retention={normalized.get('avg_view_percentage')}"
+    )
+    
+    # Step 3: Create and persist AnalyticsSnapshot
+    snapshot = AnalyticsSnapshot(
+        channel_id=channel_uuid,
+        period=normalized["period"],
+        views=normalized["views"],
+        subscribers=normalized["subscribers"],
+        avg_ctr=normalized.get("avg_ctr"),
+        avg_watch_time_minutes=normalized["avg_watch_time_minutes"],
+        impressions=normalized.get("impressions"),
+        avg_view_percentage=normalized.get("avg_view_percentage"),
+        traffic_sources=normalized.get("traffic_sources")
+    )
+    
+    postgres_store.save_analytics_snapshot(snapshot)
+    logger.info(f"Analytics snapshot persisted for channel {channel_uuid}")
+    
+    # Build output with optional comparison data
+    output_data = {
+        "message": "Analytics fetched and persisted successfully",
+        "data": normalized
+    }
+    if normalized_7d:
+        output_data["data_7d"] = normalized_7d
+    
+    return output_data

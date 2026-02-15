@@ -29,6 +29,7 @@ class ExecutionPlan:
     confidence: float = 0.0
     requires_deep_analysis: bool = False
     context_requirements: list[str] = field(default_factory=list)
+    parameters: dict[str, Any] = field(default_factory=dict)
 
     def add_tool(self, tool_name: str, reason: str) -> None:
         """Add a tool to the execution plan with reasoning."""
@@ -44,7 +45,8 @@ class ExecutionPlan:
             "intent": self.intent_classification,
             "confidence": self.confidence,
             "deep_analysis": self.requires_deep_analysis,
-            "context_requirements": self.context_requirements
+            "context_requirements": self.context_requirements,
+            "parameters": self.parameters
         }
 
 
@@ -58,11 +60,28 @@ class ExecutionPlanner:
     """
 
     # Intent patterns - maps regex patterns to intent classifications
+    # Account patterns — checked with priority boost before analytics
+    ACCOUNT_PATTERNS: list[str] = [
+        r"\bwho am i\b",
+        r"\bwhat(?:'?s|\s+is) my name\b",
+        r"\bmy channel name\b",
+        r"\bchannel info\b",
+        r"\bmy profile\b",
+        r"\bmy subscribers\b",
+        r"\bsubscriber count\b",
+        r"\bhow many subscribers\b",
+        r"\bmy account\b",
+        r"\btell me (?:about )?my (?:channel|name|account|profile)\b",
+        r"\bwho(?:'?s| is) (?:the )?(?:channel )?(?:owner|creator)\b",
+    ]
+
     INTENT_PATTERNS: dict[str, list[str]] = {
+        "account": ACCOUNT_PATTERNS,
         "analytics": [
-            r"\b(analytic|metric|stat|performance|growth|trend)\b",
+            r"\b(analytic|metric|stat|performance|grow\w*|trend)\b",
             r"\b(how many|how much|count|total|average)\b",
-            r"\b(compare|comparison|versus|vs)\b"
+            r"\b(compare|comparison|versus|vs)\b",
+            r"\b(ctr|click through rate|impression|retention|watch time)\b"
         ],
         "insight": [
             r"\b(insight|recommend|suggest|advice|should|best)\b",
@@ -95,20 +114,22 @@ class ExecutionPlanner:
             r"\b(how|what).*(last|latest|recent)\s+video.*(perform|doing)\b",
             r"\bnext video\s+(improve|ideas?|suggestion|tip)\b",
             r"\b(improve|better)\s+(next|my)\s+video\b",
-            r"\blast upload.*(perform|analyz|review)\b"
+            r"\blast upload.*(perform|analyz|review)\b",
+            r"\b(latest|last|recent|newest) video\b"
         ]
     }
 
     # Maps intents to relevant tools
     INTENT_TOOL_MAP: dict[str, list[str]] = {
+        "account": [],  # No tools — answered from profile context only
         "analytics": ["fetch_analytics", "compute_metrics", "generate_chart"],
-        "insight": ["analyze_data", "generate_insight", "get_recommendations"],
+        "insight": ["fetch_analytics", "analyze_data", "generate_insight", "get_recommendations"],
         "report": ["generate_report", "summarize_data", "fetch_analytics"],
         "memory": ["recall_context", "search_history"],
         "action": ["execute_action", "schedule_task"],
-        "search": ["search_data", "recall_context"],
+        "search": ["fetch_analytics", "search_data", "recall_context"],
         "video_analysis": ["fetch_last_video_analytics", "recall_context"],
-        "general": ["recall_context"]  # Default fallback
+        "general": ["recall_context"]
     }
 
     def __init__(self) -> None:
@@ -192,8 +213,18 @@ class ExecutionPlanner:
                 plan.add_tool("recall_context",
                               "Required for conversation continuity")
 
+        # Safety check: account intent must never have tools
+        if intent == "account":
+            plan.tools_to_execute = []
+            plan.reasoning = {}
+
+        # Step 7: Determine execution parameters (period, flags)
+        plan.parameters = self._determine_parameters(message, intent)
+
         logger.info(
-            f"Plan created: {len(plan.tools_to_execute)} tools selected")
+            f"Plan created: {len(plan.tools_to_execute)} tools selected. "
+            f"Params: {plan.parameters}"
+        )
 
         return plan
 
@@ -212,12 +243,31 @@ class ExecutionPlanner:
         """
         scores: dict[str, int] = {}
 
+
+        # 0. Guardrail: Detect irrelevant / off-topic queries immediately
+        irrelevant_patterns = [
+            r"\b(political|election|vote|government|policy)\b",
+            r"\b(recipe|cook|food|pasta|ingredients)\b",
+            r"\b(weather|sports|news|celebrity)\b"
+        ]
+        for pattern in irrelevant_patterns:
+            if re.search(pattern, message, re.IGNORECASE):
+                logger.info("Irrelevant intent detected — defaulting to general")
+                return ("general", 0.5)
+
+        # 1. Score intents based on pattern matches
         for intent, patterns in self._compiled_patterns.items():
             score = 0
             for pattern in patterns:
                 matches = pattern.findall(message)
                 score += len(matches)
             scores[intent] = score
+
+        # Account intent takes absolute priority — if any account
+        # pattern matched, return immediately regardless of other scores.
+        if scores.get("account", 0) > 0:
+            logger.info("Account intent detected — skipping analytics")
+            return ("account", 0.95)
 
         # Find the highest scoring intent
         if not any(scores.values()):
@@ -255,15 +305,24 @@ class ExecutionPlanner:
         Returns:
             Tuple of (intent_name, confidence_score) - may be unchanged
         """
-        # Check if channel context exists (indicating channel_id is present)
-        historical = memory_context.get("historical", {})
-        has_channel_context = (
-            historical.get("latest_snapshot") is not None or
-            historical.get("recent_insights") is not None
-        )
+        # Check if channel context exists
+        # Primary: OAuth channel context injected by executor (Step 1c)
+        has_channel_context = memory_context.get("channel") is not None
+        
+        # Fallback: historical data from PostgreSQL
+        if not has_channel_context:
+            historical = memory_context.get("historical", {})
+            has_channel_context = (
+                historical.get("latest_snapshot") is not None or
+                historical.get("recent_insights") is not None
+            )
 
         if not has_channel_context:
             # No channel context - no override
+            return (current_intent, current_confidence)
+
+        # Never override account or video_analysis intent
+        if current_intent in ["account", "video_analysis"]:
             return (current_intent, current_confidence)
 
         # Analytics keywords that should trigger override
@@ -390,3 +449,53 @@ class ExecutionPlanner:
         }
 
         return reasons.get(tool_name, f"Selected for '{intent}' intent processing")
+
+    def _determine_parameters(self, message: str, intent: str) -> dict[str, Any]:
+        """
+        Determine execution parameters like time period and flags.
+
+        Args:
+            message: User's message
+            intent: Classified intent
+
+        Returns:
+            Dictionary of parameter overrides
+        """
+        params = {}
+        msg_lower = message.lower()
+
+        # 1. Determine period (default to 7d)
+        if re.search(r"\b(28 day|month|4 week)\b", msg_lower):
+            params["period"] = "28d"
+        elif re.search(r"\b(grow\w*|trend)\b", msg_lower):
+            # Growth queries often benefit from longer context
+            params["period"] = "28d"
+        elif re.search(
+            r"\b(what|which).*(upload|post|make|create)\b"
+            r"|\bcontent strategy\b"
+            r"|\b(next|future).*(video|topic)\b"
+            r"|\bshould i (upload|post|make)\b",
+            msg_lower
+        ):
+            # Content strategy queries need both periods for trend comparison
+            params["period"] = "28d"
+            params["compare_periods"] = True
+        
+        # 2. Determine if video library is needed
+        # Triggers: "what should I post", "content strategy", "video ideas"
+        library_triggers = [
+            r"\b(what|which).*(post|upload|video|content)\b",
+            r"\b(next|future).*(video|topic|idea)\b",
+            r"\bcontent strategy\b",
+            r"\blibrary\b",
+            r"\bpast videos\b",
+            r"\bwhat.*work(ing|ed)\b",
+            r"\bupload next\b",
+            r"\bshould i (make|create|film|record)\b",
+            r"\bvideo ideas?\b"
+        ]
+        
+        if any(re.search(p, msg_lower) for p in library_triggers):
+            params["fetch_library"] = True
+            
+        return params

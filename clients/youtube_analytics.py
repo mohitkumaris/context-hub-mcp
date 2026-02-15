@@ -133,7 +133,8 @@ class YouTubeAnalyticsClient:
         metrics: str,
         dimensions: Optional[str] = None,
         filters: Optional[str] = None,
-        sort: Optional[str] = None
+        sort: Optional[str] = None,
+        max_results: Optional[int] = None
     ) -> dict[str, Any]:
         """
         Query the YouTube Analytics reports API.
@@ -168,6 +169,8 @@ class YouTubeAnalyticsClient:
             query_params["filters"] = filters
         if sort:
             query_params["sort"] = sort
+        if max_results is not None:
+            query_params["maxResults"] = max_results
         
         logger.info(
             f"Calling YouTube Analytics API: "

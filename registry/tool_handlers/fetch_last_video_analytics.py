@@ -109,6 +109,78 @@ class YouTubeVideoFetcher:
             )
         return self._analytics_service
     
+    def get_recent_videos(
+        self, limit: int = 5
+    ) -> list[dict[str, Any]]:
+        """
+        Fetch the most recently published videos for the channel.
+        
+        Returns a list of recent videos with basic metadata and stats,
+        useful for content strategy analysis.
+        
+        Args:
+            limit: Maximum number of videos to return (default: 5).
+            
+        Returns:
+            List of video dicts with id, title, published_at, views,
+            likes, comments.
+        """
+        service = self._get_data_service()
+        
+        # Get the channel's uploads playlist ID
+        channels_response = service.channels().list(
+            part="contentDetails",
+            mine=True
+        ).execute()
+        
+        if not channels_response.get("items"):
+            logger.warning("No channel found for authenticated user")
+            return []
+        
+        uploads_playlist_id = (
+            channels_response["items"][0]
+            ["contentDetails"]["relatedPlaylists"]["uploads"]
+        )
+        
+        # Get recent videos from uploads playlist
+        playlist_response = service.playlistItems().list(
+            part="snippet",
+            playlistId=uploads_playlist_id,
+            maxResults=limit
+        ).execute()
+        
+        items = playlist_response.get("items", [])
+        if not items:
+            return []
+        
+        # Get video IDs
+        video_ids = [
+            item["snippet"]["resourceId"]["videoId"]
+            for item in items
+        ]
+        
+        # Fetch full stats for all videos in one batch call
+        videos_response = service.videos().list(
+            part="snippet,statistics",
+            id=",".join(video_ids)
+        ).execute()
+        
+        results = []
+        for video in videos_response.get("items", []):
+            snippet = video["snippet"]
+            stats = video.get("statistics", {})
+            results.append({
+                "video_id": video["id"],
+                "title": snippet.get("title", "Untitled"),
+                "published_at": snippet.get("publishedAt"),
+                "views": int(stats.get("viewCount", 0)),
+                "likes": int(stats.get("likeCount", 0)),
+                "comments": int(stats.get("commentCount", 0))
+            })
+        
+        logger.info(f"Fetched {len(results)} recent videos for content library")
+        return results
+    
     def get_latest_video(self) -> Optional[dict[str, Any]]:
         """
         Fetch the most recently published video for the authenticated channel.
@@ -217,7 +289,7 @@ class YouTubeVideoFetcher:
         return {}
 
 
-async def handle_fetch_last_video_analytics(input_data: dict[str, Any]) -> ToolResult:
+async def handle_fetch_last_video_analytics(input_data: dict[str, Any]) -> dict[str, Any]:
     """
     Handle the fetch_last_video_analytics tool execution.
     
@@ -229,7 +301,7 @@ async def handle_fetch_last_video_analytics(input_data: dict[str, Any]) -> ToolR
             - context: Dict with "channel" key containing OAuth tokens
             
     Returns:
-        ToolResult with success status and structured video analytics data.
+        Dict with structured video analytics data.
     """
     # Extract channel from context (injected by executor)
     context = input_data.get("context", {})
@@ -237,11 +309,7 @@ async def handle_fetch_last_video_analytics(input_data: dict[str, Any]) -> ToolR
     
     if not channel_data:
         logger.warning("fetch_last_video_analytics called without channel context")
-        return ToolResult(
-            tool_name="fetch_last_video_analytics",
-            success=False,
-            error="No channel context available. Please connect a YouTube channel first."
-        )
+        raise ValueError("No channel context available. Please connect a YouTube channel first.")
     
     channel_id = channel_data.get("id")
     access_token = channel_data.get("access_token")
@@ -249,16 +317,15 @@ async def handle_fetch_last_video_analytics(input_data: dict[str, Any]) -> ToolR
     
     if not access_token:
         logger.error(f"No access_token for channel {channel_name}")
-        return ToolResult(
-            tool_name="fetch_last_video_analytics",
-            success=False,
-            error="Channel has no access_token. Please reconnect YouTube."
-        )
+        raise ValueError("Channel has no access_token. Please reconnect YouTube.")
     
     # Extract refresh_token for automatic token refresh
     refresh_token = channel_data.get("refresh_token")
     
     logger.info(f"[PRO] Fetching last video analytics for channel: {channel_name}")
+    
+    # Check if we should fetch library instead of just last video
+    fetch_library = input_data.get("fetch_library", False)
     
     try:
         fetcher = YouTubeVideoFetcher(
@@ -266,18 +333,26 @@ async def handle_fetch_last_video_analytics(input_data: dict[str, Any]) -> ToolR
             refresh_token=refresh_token
         )
         
+        if fetch_library:
+            logger.info(f"[PRO] Fetching recent video library for channel: {channel_name}")
+            recent_videos = fetcher.get_recent_videos(limit=5)
+            
+            return {
+                "message": "Video library fetched successfully",
+                "data": {
+                    "library": recent_videos
+                }
+            }
+            
+        # Default behavior: Fetch last video analytics
         # Step 1: Get the latest video
         video = fetcher.get_latest_video()
         
         if not video:
-            return ToolResult(
-                tool_name="fetch_last_video_analytics",
-                success=True,
-                output={
-                    "message": "No videos found on this channel.",
-                    "data": None
-                }
-            )
+            return {
+                "message": "No videos found on this channel.",
+                "data": None
+            }
         
         video_id = video["video_id"]
         title = video["title"]
@@ -318,26 +393,14 @@ async def handle_fetch_last_video_analytics(input_data: dict[str, Any]) -> ToolR
             f"video_id={video_id}, title='{title}', views={views}"
         )
         
-        return ToolResult(
-            tool_name="fetch_last_video_analytics",
-            success=True,
-            output={
-                "message": "Last video analytics fetched successfully",
-                "data": normalized_data
-            }
-        )
+        return {
+            "message": "Last video analytics fetched successfully",
+            "data": normalized_data
+        }
         
     except HttpError as e:
         logger.error(f"YouTube API error in fetch_last_video_analytics: {e}")
-        return ToolResult(
-            tool_name="fetch_last_video_analytics",
-            success=False,
-            error=f"YouTube API error: {str(e)}"
-        )
+        raise RuntimeError(f"YouTube API error: {str(e)}")
     except Exception as e:
         logger.exception(f"Unexpected error in fetch_last_video_analytics: {e}")
-        return ToolResult(
-            tool_name="fetch_last_video_analytics",
-            success=False,
-            error=f"Unexpected error: {str(e)}"
-        )
+        raise RuntimeError(f"Unexpected error: {str(e)}")

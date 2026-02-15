@@ -58,7 +58,8 @@ class ResponseFormatter:
         llm_response: str,
         tool_results: list[ToolResult],
         plan: ExecutionPlan,
-        metadata: Optional[dict[str, Any]] = None
+        metadata: Optional[dict[str, Any]] = None,
+        structured_data: Optional[dict[str, Any]] = None
     ) -> "ExecuteResponse":
         """
         Format the complete response for API output.
@@ -110,14 +111,20 @@ class ResponseFormatter:
         # IMPORTANT: Return the FULL llm_response - no truncation or slicing
         answer = formatted.content  # Full response text
 
+        # Override content_type to 'analytics' when structured data is present
+        content_type = formatted.content_type
+        if structured_data:
+            content_type = "analytics"
+
         return ExecuteResponse(
             success=success,
             content=answer,  # Maps to 'answer' for frontend
-            content_type=formatted.content_type,
+            content_type=content_type,
             tools_used=tools_used,
             tool_outputs=formatted.tool_outputs,
             metadata=response_metadata,
-            error=self._format_errors(tool_errors) if tool_errors else None
+            error=self._format_errors(tool_errors) if tool_errors else None,
+            structured_data=structured_data
         )
 
     def _aggregate_tool_outputs(
@@ -259,7 +266,7 @@ class ResponseFormatter:
         Returns:
             Metadata dictionary
         """
-        return {
+        result = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "intent": plan.intent_classification,
             "confidence": plan.confidence,
@@ -272,9 +279,14 @@ class ResponseFormatter:
             },
             "context": {
                 "requirements": plan.context_requirements,
-                "user_plan": request_metadata.get("user_plan", "free")
-            }
+            },
+            # Top-level plan & usage fields for frontend consumption
+            "user_plan": request_metadata.get("user_plan", "free"),
         }
+        # Propagate usage metadata (None for PRO users)
+        if "usage" in request_metadata:
+            result["usage"] = request_metadata["usage"]
+        return result
 
     def _format_errors(self, errors: list[ToolResult]) -> str:
         """

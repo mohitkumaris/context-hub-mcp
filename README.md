@@ -36,7 +36,8 @@ The **Model Context Protocol** is an architectural pattern for building AI-power
 │  ┌───────────┐  │  │  ┌───────────┐  │  │  ┌───────────────────────┐  │
 │  │   Tools   │  │  │  │   Redis   │  │  │  │    system.txt         │  │
 │  │  (17 tools│  │  │  │  (short)  │  │  │  │    analysis.txt       │  │
-│  │  Registry)│  │  │  └───────────┘  │  │  └───────────────────────┘  │
+│  │  Registry)│  │  │  └───────────┘  │  │  │    top_video_analysis │  │
+│  │           │  │  │  └───────────┘  │  │  └───────────────────────┘  │
 │  ├───────────┤  │  │  ┌───────────┐  │  └─────────────────────────────┘
 │  │ Handlers  │  │  │  │ Postgres  │  │
 │  │ (modular) │  │  │  │  (long)   │  │
@@ -130,7 +131,8 @@ context-hub-mcp/
 │   │   └── youtube.py     # get_channel_snapshot, get_top_videos,
 │   │                      # video_post_mortem, weekly_growth_report
 │   └── tool_handlers/     # Real API tool implementations
-│       └── fetch_analytics.py  # Real YouTube Analytics ingestion
+│       ├── fetch_analytics.py          # Real YouTube Analytics ingestion
+│       └── fetch_last_video_analytics.py  # Last video analytics
 │
 ├── clients/               # External API clients
 │   └── youtube_analytics.py    # YouTube Analytics API OAuth client
@@ -156,12 +158,20 @@ context-hub-mcp/
 │   ├── redis_store.py     # Short-term memory (conversations)
 │   └── postgres_store.py  # Long-term memory (analytics, channels)
 │
-├── tests/                 # Unit tests
-│   └── test_server.py     # Server endpoint tests (37 tests)
+├── llm/                   # LLM client implementations
+│   └── langchain_azure.py # Azure OpenAI via LangChain
+│
+├── tests/                 # Test suite (123 tests)
+│   ├── conftest.py        # Shared fixtures
+│   ├── test_server.py     # Server endpoint tests
+│   ├── test_orchestrator.py  # Orchestrator integration tests
+│   ├── test_planner.py    # Intent classification tests
+│   └── test_response_quality.py  # Response quality assertions
 │
 └── prompts/               # LLM prompt templates
     ├── system.txt         # Core system prompt
-    └── analysis.txt       # Deep analysis mode prompt
+    ├── analysis.txt       # Deep analysis mode prompt
+    └── top_video_analysis.txt  # Top video analysis template
 ```
 
 ## YouTube Analytics Integration
@@ -1147,6 +1157,16 @@ TOOL_REQUIREMENTS: dict[str, str] = {
 ### Adding LLM Providers
 
 Extend the `_invoke_llm` method in `executor/execute.py` to support additional providers.
+
+## Recent Updates
+
+### v1.2.0 — Intelligent Query Differentiation
+- **Content Strategy vs Growth responses**: The executor now detects query sub-types and applies the correct analysis template — content strategy queries get video concepts and hook scripts, growth queries get bottleneck diagnosis and targeted moves
+- **Subscriber count fix**: `account` intent now receives channel stats context without triggering the analytics diagnosis prompt
+- **New `_is_growth_query` detector**: Pattern-based detection for growth/improvement questions
+- **Top video analysis**: Dedicated prompt template and detection logic for top-performing video queries
+- **Extended test suite**: 123 tests covering server endpoints, orchestrator logic, planner intent classification, and response quality
+- **LangChain Azure client**: Added Azure OpenAI support via LangChain integration
 
 ## License
 

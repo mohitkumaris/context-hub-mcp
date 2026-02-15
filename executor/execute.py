@@ -28,6 +28,7 @@ from db.models.analytics_snapshot import AnalyticsSnapshot
 from db.models.weekly_insight import WeeklyInsight
 from db.models.chat_session import ChatSession
 from llm.langchain_gemini import LangChainGeminiClient
+from llm.langchain_azure import LangChainAzureClient
 from analytics.context_builder import AnalyticsContextBuilder
 
 logger = logging.getLogger(__name__)
@@ -56,8 +57,20 @@ class ContextOrchestrator:
         self.policy_engine = PolicyEngine()
         self.redis_store = RedisMemoryStore()
         self.postgres_store = PostgresMemoryStore()
-        self.gemini_client = LangChainGeminiClient()
         self.analytics_builder = AnalyticsContextBuilder()
+
+        # Initialize LLM client based on provider config
+        if config.llm.provider == "azure_openai":
+            self.llm_client = LangChainAzureClient()
+            logger.info("LLM provider initialized: azure_openai")
+        elif config.llm.provider == "gemini":
+            self.llm_client = LangChainGeminiClient()
+            logger.info("LLM provider initialized: gemini")
+        else:
+            raise ValueError(
+                f"Unsupported LLM provider: {config.llm.provider}. "
+                "Supported: 'azure_openai', 'gemini'"
+            )
 
     async def _check_usage_limit(
         self,
@@ -139,6 +152,21 @@ class ContextOrchestrator:
 
         # Step 0: Check usage limits (BEFORE any tool/LLM execution)
         is_allowed, usage_count = await self._check_usage_limit(user_id, user_plan)
+        
+        # Prepare usage metadata (None for PRO users)
+        if user_plan == "pro":
+            usage_metadata = None
+        else:
+            is_exhausted = not is_allowed or usage_count >= self.FREE_DAILY_LIMIT
+            usage_metadata = {
+                "used": min(usage_count, self.FREE_DAILY_LIMIT),
+                "limit": self.FREE_DAILY_LIMIT,
+                "exhausted": is_exhausted
+            }
+        
+        # Store user_plan in metadata so formatter can propagate it
+        metadata["user_plan"] = user_plan
+        
         if not is_allowed:
             return ExecuteResponse(
                 success=False,
@@ -146,6 +174,10 @@ class ContextOrchestrator:
                     "code": "PLAN_LIMIT_REACHED",
                     "message": "You've reached your free analysis limit for today. "
                                "Upgrade to PRO to unlock unlimited insights."
+                },
+                metadata={
+                    "user_plan": user_plan,
+                    "usage": usage_metadata
                 }
             )
 
@@ -219,11 +251,17 @@ class ContextOrchestrator:
         # Step 3: Check policy permissions
         approved_tools = self._filter_by_policy(plan, user_plan)
 
+        # HARD GUARDRAIL: account intent must never execute tools
+        if plan.intent_classification == "account":
+            approved_tools = []
+            tool_results = []
+            logger.info("Account intent — skipping all tool execution")
+
         # Step 4: Execute approved tools
         if approved_tools:
             logger.debug(f"Executing {len(approved_tools)} tools")
             tool_results = await self._execute_tools(
-                approved_tools, message, memory_context
+                approved_tools, message, memory_context, plan.parameters
             )
 
         # Step 5: Call LLM with full context (including historical)
@@ -255,12 +293,20 @@ class ContextOrchestrator:
             confidence=plan.confidence if hasattr(plan, "confidence") else None
         )
 
-        # Step 8: Format and return response
+        # Step 8: Build structured analytics data for the response
+        structured_data = self._build_structured_data(tool_results)
+
+        # Inject usage metadata into request metadata
+        # so _build_metadata can propagate it to the response
+        metadata["usage"] = usage_metadata
+
+        # Step 9: Format and return response
         return self.formatter.format_response(
             llm_response=llm_response,
             tool_results=tool_results,
             plan=plan,
-            metadata=metadata
+            metadata=metadata,
+            structured_data=structured_data
         )
 
     def _safe_parse_uuid(self, id_str: str) -> Optional[UUID]:
@@ -582,7 +628,8 @@ class ContextOrchestrator:
         self,
         tool_names: list[str],
         message: str,
-        context: dict[str, Any]
+        context: dict[str, Any],
+        parameters: dict[str, Any] = None
     ) -> list[ToolResult]:
         """
         Execute a list of tools and collect results.
@@ -591,19 +638,28 @@ class ContextOrchestrator:
             tool_names: Names of tools to execute
             message: Original user message
             context: Memory context for tool execution
+            parameters: Optional execution parameters from planner
 
         Returns:
             List of tool execution results
         """
         results = []
+        parameters = parameters or {}
+        
         for tool_name in tool_names:
             try:
+                # Base input data
+                input_data = {
+                    "message": message,
+                    "context": context
+                }
+                
+                # Merge planner parameters (e.g. period="28d", fetch_library=True)
+                input_data.update(parameters)
+                
                 result = await self.tool_registry.execute_tool(
                     tool_name=tool_name,
-                    input_data={
-                        "message": message,
-                        "context": context
-                    }
+                    input_data=input_data
                 )
                 results.append(result)
             except Exception as e:
@@ -640,11 +696,27 @@ class ContextOrchestrator:
         """
         # Load system prompt
         system_prompt = self._load_prompt("system")
+        
+        # Load analysis prompt (includes content strategy template)
+        analysis_prompt = self._load_prompt("analysis")
 
-        # Build structured analytics context
-        analytics_context = self.analytics_builder.build_analytics_context(
-            channel_uuid
-        )
+        # HARD GUARDRAIL: Only build analytics context for analytics intents
+        analytics_intents = {"analytics", "video_analysis", "insight", "report"}
+        # Broader set: intents that need channel data context (e.g. subscriber count)
+        context_intents = analytics_intents | {"account"}
+        
+        if plan.intent_classification in context_intents:
+            analytics_context = self.analytics_builder.build_analytics_context(
+                channel_uuid
+            )
+            # If fetch_analytics tool returned fresh data, use it
+            # to override stale/empty DB context for this request
+            analytics_context = self._merge_tool_analytics(
+                analytics_context, tool_results
+            )
+        else:
+            analytics_context = {}
+            logger.info(f"Skipping analytics injection for intent: {plan.intent_classification}")
 
         # Build context for LLM
         context_parts = []
@@ -718,14 +790,143 @@ class ContextOrchestrator:
             context_parts) if context_parts else "No additional context."
 
         # Build structured analytics section
-        analytics_section = self._build_analytics_prompt_section(analytics_context)
+        # HARD GUARDRAIL: Only inject analytics prompt section for analytics intents
+        if plan.intent_classification in analytics_intents:
+            analytics_section = self._build_analytics_prompt_section(analytics_context)
+        else:
+            analytics_section = ""
 
         # Build video analytics section from tool results
         video_analytics_section = self._build_video_analytics_prompt_section(tool_results)
 
+        # Parse and strip [TOP_VIDEO_CONTEXT] metadata from message
+        clean_message, top_video_meta = self._parse_top_video_context(message)
+        is_top_video = self._is_top_video_query(clean_message)
+
         # Build the prompt
-        full_prompt = f"""
+        if is_top_video and top_video_meta:
+            # --- DEDICATED TOP VIDEO ANALYSIS PATH ---
+            top_video_prompt = self._load_prompt("top_video_analysis")
+
+            # Build video metrics section from parsed metadata
+            tv_views = top_video_meta.get("views", 0)
+            tv_growth = top_video_meta.get("growth", 0)
+            tv_title = top_video_meta.get("title", "Unknown")
+            video_metrics_section = (
+                f"\nVideo Performance Data (last 7 days):\n"
+                f"- Title: {tv_title}\n"
+                f"- Views: {tv_views:,}\n"
+                f"- Growth vs previous 7 days: {'+' if tv_growth > 0 else ''}{tv_growth}%\n"
+            )
+
+            instructions_block = (
+                "Instructions:\n"
+                "- Follow the top video analysis template EXACTLY\n"
+                "- Use ONLY the video metrics provided above\n"
+                "- Do NOT mention video IDs or internal metadata\n"
+                "- Do NOT echo the user's prompt back to them\n"
+                "- Do NOT use markdown tables or raw JSON\n"
+                "- Do NOT compare to channel-wide stats"
+            )
+
+            full_prompt = f"""
 {system_prompt}
+
+{top_video_prompt}
+
+{video_metrics_section}
+
+Context:
+{full_context}
+
+User message: {clean_message}
+
+{instructions_block}
+"""
+        else:
+            # --- STANDARD ANALYSIS PATH ---
+            # Detect content strategy queries
+            is_content_strategy = self._is_content_strategy_query(
+                clean_message, plan.intent_classification
+            )
+
+            # Build analysis section — include full template for content strategy queries
+            analysis_section_prompt = ""
+            if analysis_prompt:
+                if is_content_strategy:
+                    analysis_section_prompt = f"\n{analysis_prompt}\n"
+                else:
+                    # Include only benchmarks and partial data rules for non-strategy queries
+                    analysis_section_prompt = f"\n{analysis_prompt}\n"
+
+            # Build intent-appropriate instructions
+            # Detect query sub-type for analytics intents
+            is_growth_query = self._is_growth_query(
+                clean_message, plan.intent_classification
+            )
+
+            if plan.intent_classification in analytics_intents:
+                if is_content_strategy:
+                    instructions_block = """Instructions:
+- The user is asking a CONTENT STRATEGY question — "What should I upload next?"
+- Follow the CONTENT STRATEGY TEMPLATE from the analysis prompt.
+- Lead with the Data Signal: what does the data reveal about audience behavior?
+- Give a decisive Strategic Direction: should the creator double down or pivot?
+- Propose a concrete Next Video Concept with an emotional angle, not a vague theme.
+- Include a Hook Script (first 5 seconds), 3 Title Options, and Thumbnail Direction.
+- Recommend Format + Duration based on retention data.
+- Set measurable Success Metrics.
+- Do NOT start with a Growth Bottleneck Diagnosis — this is a creative strategy response.
+- Do NOT use generic suggestions like "try trending topics."
+- No markdown tables. No raw JSON. No emoji.
+- Tone: creative strategist who knows the data inside-out."""
+                elif is_growth_query:
+                    instructions_block = """Instructions:
+- The user is asking a GROWTH question — "How can I grow faster?"
+- Follow the GROWTH ANALYSIS TEMPLATE from the analysis prompt.
+- Lead with the Growth Bottleneck Diagnosis: name the #1 constraint with its metric.
+- Then cover Leverage What's Working: identify the replicable content pattern or traffic source.
+- Give 2–3 Targeted Growth Moves that directly address the diagnosed bottleneck.
+- End with Strategic Expansion: how to scale beyond the current pattern (series, formats, cross-platform).
+- Each move must pass: "Is this specific to THIS channel's data, or could it apply to anyone?"
+- Do NOT suggest generic phrases like "improve thumbnails" or "engage your audience."
+- No markdown tables. No raw JSON. No emoji.
+- Tone: strategic growth advisor reviewing a performance dashboard."""
+                else:
+                    instructions_block = """Instructions:
+- DIAGNOSE FIRST: Identify the #1 bottleneck (retention, CTR, traffic source, subscriber conversion, or distribution) before any recommendation.
+- State the bottleneck explicitly in the first paragraph.
+- Do NOT list metrics without interpreting them. Metrics are evidence, not the response.
+- Every recommendation must directly address the diagnosed bottleneck.
+- If retention > 50%, do NOT suggest retention improvements. Focus on distribution/packaging.
+- If traffic is Shorts-dominated, apply Shorts-specific strategy — not long-form logic.
+- Give 2–3 high-impact moves MAXIMUM. No spray-and-pray advice lists.
+- Each recommendation must pass: "Is this specific to THIS channel's data, or could it apply to anyone?"
+- Do NOT use generic phrases like "improve thumbnails" or "engage your audience."
+- No markdown tables. No raw JSON. No emoji.
+- Tone: strategic growth advisor reviewing a performance dashboard.
+
+When analyzing a specific video (if LAST VIDEO ANALYTICS data is present):
+- Follow the Video Analysis Template from the analysis prompt.
+- Focus on the ONE metric that tells the story — do not list all metrics.
+- Identify the replication pattern: what structural element should the next video copy?
+- Include concrete examples: rewritten titles, hook scripts, thumbnail descriptions.
+- Do NOT repeat the same metric in multiple sections."""
+            else:
+                instructions_block = """Instructions:
+- This is a conversational or account query — NOT a deep analytics request.
+- Answer the user's question directly using the Context and analytics data provided.
+- If the user asks about subscribers, views, or basic stats, quote the exact number from the analytics data.
+- Use the channel name and profile information from the Context section.
+- Do NOT provide a full analytics diagnosis or bottleneck analysis.
+- Do NOT mention tools or data sources.
+- Keep the response short, friendly, and helpful.
+- Do NOT use emoji."""
+
+            full_prompt = f"""
+{system_prompt}
+
+{analysis_section_prompt}
 
 {analytics_section}
 
@@ -734,28 +935,99 @@ class ContextOrchestrator:
 Context:
 {full_context}
 
-User message: {message}
+User message: {clean_message}
 
-Instructions:
-- Analyze performance based ONLY on the structured analytics data above
-- Compare current vs previous period if both are available
-- Do NOT guess or hallucinate numbers
-- If data is missing, explicitly say so
-- Provide a helpful, data-backed response
-
-When analyzing the user's latest video (if LAST VIDEO ANALYTICS data is present):
-- Analyze performance ONLY from the provided data
-- Explain what worked well based on the metrics
-- Explain what could be improved based on the metrics
-- Provide exactly 3 actionable improvement suggestions for future videos
-- Provide exactly 3 specific ideas for the next video based on current performance
-- Do NOT hallucinate metrics - only use the exact numbers provided
+{instructions_block}
 """
 
-        # Call LLM (stub implementation - replace with actual provider)
+        # Call LLM
         response = await self._invoke_llm(full_prompt)
 
         return response
+
+    def _merge_tool_analytics(
+        self,
+        analytics_context: dict[str, Any],
+        tool_results: list[ToolResult]
+    ) -> dict[str, Any]:
+        """
+        Merge fresh analytics from tool results into analytics context.
+
+        When fetch_analytics returns live data, ALWAYS use it to build
+        the analytics context and availability flags — regardless of
+        whether the DB already had a snapshot. The live data from the
+        current request is always more authoritative than stale DB data.
+
+        Args:
+            analytics_context: Context from AnalyticsContextBuilder (may be empty/stale).
+            tool_results: Results from tool execution.
+
+        Returns:
+            Updated analytics context with live data merged in.
+        """
+        # Find fetch_analytics result with live data
+        for result in tool_results:
+            if result.tool_name == "fetch_analytics" and result.success:
+                output = result.output
+                if isinstance(output, dict) and output.get("data"):
+                    data = output["data"]
+                    if not data:
+                        continue
+
+                    # Always prefer fresh tool data over DB snapshot
+                    impressions = data.get("impressions") or 0
+                    analytics_context["current_period"] = {
+                        "period": data.get("period", "last_7_days"),
+                        "views": data.get("views", 0),
+                        "subscribers_gained": data.get("subscribers", 0),
+                        "avg_watch_time_minutes": data.get(
+                            "avg_watch_time_minutes", 0.0
+                        ),
+                        "impressions": data.get("impressions"),
+                        "ctr": data.get("avg_ctr"),
+                        "avg_view_percentage": data.get("avg_view_percentage"),
+                        "traffic_sources": data.get("traffic_sources"),
+                    }
+
+                    # Set availability flags from live data
+                    analytics_context["has_ctr"] = impressions > 0
+                    analytics_context["has_retention"] = (
+                        data.get("avg_view_percentage") is not None
+                    )
+                    analytics_context["has_traffic_sources"] = bool(
+                        data.get("traffic_sources")
+                    )
+
+                    # Merge 7d comparison data if available (dual-period fetch)
+                    data_7d = output.get("data_7d")
+                    if data_7d and isinstance(data_7d, dict):
+                        analytics_context["period_7d"] = {
+                            "period": data_7d.get("period", "last_7_days"),
+                            "views": data_7d.get("views", 0),
+                            "subscribers_gained": data_7d.get("subscribers", 0),
+                            "avg_watch_time_minutes": data_7d.get(
+                                "avg_watch_time_minutes", 0.0
+                            ),
+                            "impressions": data_7d.get("impressions"),
+                            "ctr": data_7d.get("avg_ctr"),
+                            "avg_view_percentage": data_7d.get("avg_view_percentage"),
+                            "traffic_sources": data_7d.get("traffic_sources"),
+                        }
+                        logger.info(
+                            f"Merged 7d comparison data: "
+                            f"views_7d={data_7d.get('views')}, "
+                            f"avg_view_%_7d={data_7d.get('avg_view_percentage')}"
+                        )
+
+                    logger.info(
+                        f"Merged live analytics into context: "
+                        f"has_ctr={analytics_context['has_ctr']}, "
+                        f"has_retention={analytics_context['has_retention']}, "
+                        f"has_traffic_sources={analytics_context['has_traffic_sources']}"
+                    )
+                    break
+
+        return analytics_context
 
     def _build_analytics_prompt_section(
         self,
@@ -838,6 +1110,53 @@ When analyzing the user's latest video (if LAST VIDEO ANALYTICS data is present)
             
             lines.append(f"- Avg watch time: {previous.get('avg_watch_time_minutes', 0):.1f} minutes")
 
+        # 7-day comparison period (for content strategy dual-period analysis)
+        period_7d = analytics_context.get("period_7d")
+        if period_7d:
+            lines.append(f"\n7-Day Period ({period_7d.get('period', 'last_7_days')}):")
+            lines.append(f"- Views: {period_7d.get('views', 0):,}")
+            lines.append(f"- Subscribers gained: {period_7d.get('subscribers_gained', 0):,}")
+            lines.append(f"- Avg watch time: {period_7d.get('avg_watch_time_minutes', 0):.1f} minutes")
+            
+            if period_7d.get('avg_view_percentage') is not None:
+                lines.append(f"- Avg view percentage: {period_7d['avg_view_percentage']:.1f}%")
+            
+            # Compute and display deltas between 28d and 7d
+            if current and period_7d:
+                lines.append("\nPERIOD COMPARISON (7d vs 28d):")
+                
+                avp_28d = current.get('avg_view_percentage')
+                avp_7d = period_7d.get('avg_view_percentage')
+                if avp_28d is not None and avp_7d is not None:
+                    delta = avp_7d - avp_28d
+                    direction = "+" if delta >= 0 else ""
+                    lines.append(
+                        f"- Avg view percentage: 28d={avp_28d:.1f}%, 7d={avp_7d:.1f}%, "
+                        f"delta={direction}{delta:.2f}%"
+                    )
+                
+                wt_28d = current.get('avg_watch_time_minutes', 0)
+                wt_7d = period_7d.get('avg_watch_time_minutes', 0)
+                if wt_28d > 0:
+                    wt_delta = wt_7d - wt_28d
+                    direction = "+" if wt_delta >= 0 else ""
+                    lines.append(
+                        f"- Avg watch time: 28d={wt_28d:.1f}min, 7d={wt_7d:.1f}min, "
+                        f"delta={direction}{wt_delta:.1f}min"
+                    )
+                
+                views_28d = current.get('views', 0)
+                views_7d = period_7d.get('views', 0)
+                if views_28d > 0:
+                    # Normalize 28d views to 7d equivalent for fair comparison
+                    views_28d_weekly = views_28d / 4
+                    views_delta_pct = ((views_7d - views_28d_weekly) / views_28d_weekly) * 100
+                    direction = "+" if views_delta_pct >= 0 else ""
+                    lines.append(
+                        f"- Views: 28d total={views_28d:,}, 7d total={views_7d:,}, "
+                        f"7d vs weekly avg={direction}{views_delta_pct:.1f}%"
+                    )
+
         return "\n".join(lines)
 
     def _build_video_analytics_prompt_section(
@@ -868,6 +1187,24 @@ When analyzing the user's latest video (if LAST VIDEO ANALYTICS data is present)
         if not video_data:
             return ""
 
+        # Handle Video Library (List of videos)
+        if "library" in video_data:
+            library = video_data["library"]
+            if not library:
+                return "## VIDEO LIBRARY\nNo recent videos found."
+                
+            lines = ["## VIDEO LIBRARY CONTEXT (Use to recommend next steps)"]
+            lines.append("Recent videos performance:")
+            
+            for vid in library:
+                title = vid.get("title", "Untitled")
+                views = vid.get("views", 0)
+                pub_date = vid.get("published_at", "")[:10]  # First 10 chars (YYYY-MM-DD)
+                lines.append(f"- '{title}' ({pub_date}): {views:,} views")
+                
+            return "\n".join(lines)
+
+        # Handle Single Video Analytics
         lines = ["## LAST VIDEO ANALYTICS (USE EXACT NUMBERS)"]
         
         # Video info
@@ -898,8 +1235,8 @@ When analyzing the user's latest video (if LAST VIDEO ANALYTICS data is present)
         """
         Invoke the configured LLM provider.
 
-        This is a stub implementation. In production, this would call
-        the actual LLM API based on config.llm.provider.
+        Delegates to the active LLM client (Azure OpenAI or Gemini)
+        based on config.llm.provider.
 
         Args:
             prompt: Full prompt to send to LLM
@@ -907,11 +1244,190 @@ When analyzing the user's latest video (if LAST VIDEO ANALYTICS data is present)
         Returns:
             LLM response string
         """
-        # Call Gemini via the LangChain client
-        logger.info(
-            f"LLM invocation (LangChain Gemini): provider=google, model={config.llm.gemini_model}")
-        
-        return self.gemini_client.generate(prompt)
+        logger.info(f"LLM invocation using provider={config.llm.provider}")
+
+        return self.llm_client.generate(prompt)
+
+    def _build_structured_data(
+        self,
+        tool_results: list[ToolResult]
+    ) -> Optional[dict[str, Any]]:
+        """
+        Build structured analytics data from tool results.
+
+        Extracts analytics metrics from fetch_analytics tool output
+        and returns them as a clean dict for the structured_data response field.
+
+        Args:
+            tool_results: List of tool execution results
+
+        Returns:
+            Dict with analytics data, or None if no analytics available.
+        """
+        # Find the fetch_analytics result
+        analytics_output = None
+        for result in tool_results:
+            if result.tool_name == "fetch_analytics" and result.success and result.output:
+                analytics_output = result.output
+                break
+
+        if not analytics_output:
+            return None
+
+        current = analytics_output.get("current_period")
+        if not current:
+            return None
+
+        structured: dict[str, Any] = {
+            "period": current.get("period", "last_28_days"),
+            "views": current.get("views", 0),
+            "subscribers_gained": current.get("subscribers_gained", 0),
+            "avg_view_percentage": current.get("avg_view_percentage"),
+            "avg_watch_time_minutes": current.get("avg_watch_time_minutes", 0),
+        }
+
+        # Traffic sources
+        traffic = current.get("traffic_sources")
+        if traffic and isinstance(traffic, dict):
+            total = sum(traffic.values())
+            if total > 0:
+                sources = []
+                for source, views in sorted(
+                    traffic.items(), key=lambda x: x[1], reverse=True
+                )[:5]:
+                    sources.append({
+                        "name": source,
+                        "views": views,
+                        "percentage": round((views / total) * 100, 1)
+                    })
+                structured["traffic_sources"] = sources
+
+        # 7d comparison data
+        period_7d = analytics_output.get("period_7d")
+        if period_7d and isinstance(period_7d, dict):
+            comparison: dict[str, Any] = {
+                "period": "last_7_days",
+                "views": period_7d.get("views", 0),
+                "avg_view_percentage": period_7d.get("avg_view_percentage"),
+                "avg_watch_time_minutes": period_7d.get("avg_watch_time_minutes", 0),
+            }
+            avp_28d = current.get("avg_view_percentage")
+            avp_7d = period_7d.get("avg_view_percentage")
+            if avp_28d is not None and avp_7d is not None:
+                comparison["avg_view_percentage_delta"] = round(avp_7d - avp_28d, 2)
+
+            wt_28d = current.get("avg_watch_time_minutes", 0)
+            wt_7d = period_7d.get("avg_watch_time_minutes", 0)
+            if wt_28d > 0:
+                comparison["avg_watch_time_delta"] = round(wt_7d - wt_28d, 2)
+
+            structured["comparison_7d"] = comparison
+
+        return structured
+
+    def _is_content_strategy_query(
+        self, message: str, intent: str
+    ) -> bool:
+        """
+        Detect if the user is asking a content strategy question.
+
+        Args:
+            message: User's input message
+            intent: Classified intent from planner
+
+        Returns:
+            True if this is a content strategy / "what to upload" query
+        """
+        import re
+        msg_lower = message.lower()
+        strategy_patterns = [
+            r"\b(what|which).*(upload|post|make|create|content)\b",
+            r"\b(next|future).*(video|topic|idea|content)\b",
+            r"\bcontent strategy\b",
+            r"\bwhat should i (upload|post|make|film|record)\b",
+            r"\bvideo idea\b",
+            r"\bwhat.*work(ing|ed)\b",
+        ]
+        return any(re.search(p, msg_lower) for p in strategy_patterns)
+
+    def _is_growth_query(
+        self, message: str, intent: str
+    ) -> bool:
+        """
+        Detect if the user is asking a growth / improvement question.
+
+        Args:
+            message: User's input message
+            intent: Classified intent from planner
+
+        Returns:
+            True if this is a growth-oriented query like "How can I grow?"
+        """
+        import re
+        msg_lower = message.lower()
+        growth_patterns = [
+            r"\b(how).*(grow|scale|expand|blow up|take off)\b",
+            r"\b(grow|increase|boost)\s+(my\s+)?(channel|subscribers|views|audience)\b",
+            r"\b(help me|how to|tips for).*(grow|improv|better|more views|more subs)\b",
+            r"\bgrowth (strategy|plan|advice|tips)\b",
+            r"\bgrow faster\b",
+            r"\bget more (subscribers|views|watch time)\b",
+            r"\bscale my (channel|content)\b",
+        ]
+        return any(re.search(p, msg_lower) for p in growth_patterns)
+
+    def _is_top_video_query(self, message: str) -> bool:
+        """
+        Detect if the message is a top-video analysis request.
+
+        Args:
+            message: User's input message (already cleaned of metadata)
+
+        Returns:
+            True if this is a top-video analysis query
+        """
+        import re
+        msg_lower = message.lower()
+        patterns = [
+            r"\banalyze my top video\b",
+            r"\btop video.*last \d+ days\b",
+            r"\banalyze.*top.*(video|performer)\b",
+            r"\bwhy.*top video.*(took off|performed)\b",
+        ]
+        return any(re.search(p, msg_lower) for p in patterns)
+
+    def _parse_top_video_context(
+        self, message: str
+    ) -> tuple[str, dict | None]:
+        """
+        Extract and strip [TOP_VIDEO_CONTEXT] metadata from the message.
+
+        The frontend appends a JSON block after [TOP_VIDEO_CONTEXT]
+        which contains video metrics. This method extracts that data
+        and returns the clean message without the marker.
+
+        Args:
+            message: Raw message potentially containing metadata marker
+
+        Returns:
+            Tuple of (clean_message, metadata_dict or None)
+        """
+        import json as json_mod
+
+        marker = "[TOP_VIDEO_CONTEXT]"
+        if marker not in message:
+            return message, None
+
+        parts = message.split(marker, 1)
+        clean_message = parts[0].strip()
+
+        try:
+            metadata = json_mod.loads(parts[1].strip())
+            logger.info(f"Parsed top video context: {metadata}")
+            return clean_message, metadata
+        except (json_mod.JSONDecodeError, IndexError) as e:
+            logger.warning(f"Failed to parse top video context: {e}")
+            return clean_message, None
 
     def _load_prompt(self, prompt_type: str) -> str:
         """

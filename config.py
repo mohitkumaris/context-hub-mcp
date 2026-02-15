@@ -81,10 +81,10 @@ class PostgresConfig:
 
 @dataclass
 class LLMConfig:
-    """LLM provider configuration - agnostic to specific providers."""
+    """LLM provider configuration - supports Azure OpenAI (default) and Gemini (fallback)."""
 
     provider: str = field(
-        default_factory=lambda: os.getenv("LLM_PROVIDER", "openai"))
+        default_factory=lambda: os.getenv("LLM_PROVIDER", "azure_openai"))
     api_key: Optional[str] = field(
         default_factory=lambda: os.getenv("LLM_API_KEY"))
     model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", "gpt-4"))
@@ -96,6 +96,18 @@ class LLMConfig:
         os.getenv("LLM_TEMPERATURE", "0.7")))
     timeout: int = field(default_factory=lambda: int(
         os.getenv("LLM_TIMEOUT", "60")))
+
+    # Azure OpenAI configuration
+    azure_openai_api_key: Optional[str] = field(
+        default_factory=lambda: os.getenv("AZURE_OPENAI_API_KEY"))
+    azure_openai_endpoint: Optional[str] = field(
+        default_factory=lambda: os.getenv("AZURE_OPENAI_ENDPOINT"))
+    azure_openai_api_version: str = field(
+        default_factory=lambda: os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview"))
+    azure_openai_deployment_name: Optional[str] = field(
+        default_factory=lambda: os.getenv("AZURE_OPENAI_DEPLOYMENT"))
+
+    # Gemini configuration (fallback)
     gemini_api_key: Optional[str] = field(
         default_factory=lambda: os.getenv("GEMINI_API_KEY"))
     gemini_model: str = field(
@@ -155,8 +167,8 @@ class Config:
         """
         warnings = []
 
-        if not self.llm.api_key and not self.llm.gemini_api_key:
-            warnings.append("No LLM API key set - LLM calls will fail")
+        if not self.llm.azure_openai_api_key and not self.llm.gemini_api_key and not self.llm.api_key:
+            warnings.append("No LLM API key set (Azure OpenAI or Gemini) - LLM calls will fail")
 
         if not self.redis.password and not self.server.debug:
             warnings.append("REDIS_PASSWORD not set in production mode")

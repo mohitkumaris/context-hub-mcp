@@ -104,6 +104,11 @@ class ExecuteResponse(BaseModel):
         description="Error message or structured error object if execution failed"
     )
 
+    structured_data: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Machine-readable structured data (e.g. analytics metrics, traffic sources)"
+    )
+
     class Config:
         json_schema_extra = {
             "example": {

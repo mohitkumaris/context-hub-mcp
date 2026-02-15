@@ -82,7 +82,10 @@ def normalize_traffic_sources(traffic_response: dict[str, Any]) -> dict[str, int
     return traffic_sources
 
 
-def normalize_analytics_response(raw_response: dict[str, Any]) -> dict[str, Any]:
+def normalize_analytics_response(
+    raw_response: dict[str, Any],
+    period: str = "last_7_days"
+) -> dict[str, Any]:
     """
     Normalize raw YouTube Analytics API response to snapshot format.
     
@@ -94,11 +97,12 @@ def normalize_analytics_response(raw_response: dict[str, Any]) -> dict[str, Any]
             Can be either:
             - Simple response with 'rows' and 'columnHeaders'
             - Extended response with 'core_response' and 'traffic_response'
+        period: The period that was fetched (default: "last_7_days").
         
     Returns:
         Normalized dictionary with aggregated metrics:
         {
-            "period": "last_7_days",
+            "period": period,
             "views": int,
             "impressions": int | None,
             "avg_ctr": float | None,
@@ -120,6 +124,10 @@ def normalize_analytics_response(raw_response: dict[str, Any]) -> dict[str, Any]
         core_response = raw_response["core_response"]
         traffic_response = raw_response.get("traffic_response", {})
         traffic_sources = normalize_traffic_sources(traffic_response)
+        # Use period from response if available (it might be "7d" or "28d")
+        response_period = raw_response.get("period")
+        if response_period:
+            period = "last_28_days" if response_period == "28d" else "last_7_days"
     else:
         core_response = raw_response
         traffic_sources = None
@@ -152,24 +160,22 @@ def normalize_analytics_response(raw_response: dict[str, Any]) -> dict[str, Any]
     total_views_for_avg = 0
     
     # Track which metrics are available
-    has_impressions = "impressions" in column_map
-    has_ctr = "impressionsClickThroughRate" in column_map
+    has_impressions = "videoThumbnailImpressions" in column_map
+    has_ctr = "videoThumbnailImpressionsClickRate" in column_map
     has_view_percentage = "averageViewPercentage" in column_map
     
     if not has_impressions:
-        logger.info("Missing metric detected: impressions")
+        logger.info("Missing metric detected: videoThumbnailImpressions")
     if not has_ctr:
-        logger.info("Missing metric detected: impressionsClickThroughRate")
-    if not has_view_percentage:
-        logger.info("Missing metric detected: averageViewPercentage")
+        logger.info("Missing metric detected: videoThumbnailImpressionsClickRate")
     
     for row in rows:
         # Extract values using column indices
         views_idx = column_map.get("views")
-        impressions_idx = column_map.get("impressions")
+        impressions_idx = column_map.get("videoThumbnailImpressions")
         watch_idx = column_map.get("estimatedMinutesWatched")
         subs_idx = column_map.get("subscribersGained")
-        ctr_idx = column_map.get("impressionsClickThroughRate")
+        ctr_idx = column_map.get("videoThumbnailImpressionsClickRate")
         view_pct_idx = column_map.get("averageViewPercentage")
         
         # Aggregate core metrics
@@ -222,7 +228,7 @@ def normalize_analytics_response(raw_response: dict[str, Any]) -> dict[str, Any]
         avg_view_percentage = 0.0
     
     normalized = {
-        "period": "last_7_days",
+        "period": period,
         "views": total_views,
         "impressions": total_impressions if has_impressions else None,
         "subscribers": total_subscribers_gained,
